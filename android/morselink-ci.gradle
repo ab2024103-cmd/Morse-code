@@ -176,12 +176,15 @@ def mlReport = { String label, String chain, String tail ->
         }
     }
     int n = 0
-    // The chain messages carry the actionable text (AAPT2 / kotlinc detail is
-    // inside the exception messages) — send them FIRST, one annotation each.
-    chain.readLines().findAll { it.trim().length() > 0 }.each { c ->
-        if (n < 6) {
-            println("::error::mordchain[" + (n++) + "][" + label.take(16) + "] " + c.trim().replace("::", "-").take(4900))
-        }
+    // The chain messages carry the actionable text (AAPT2 / kotlinc / task
+    // detail is inside exception messages). Send the LAST lines first: the
+    // deepest cause content (the real error) is at the end of the chain.
+    def chainLines = chain.readLines().findAll { it.trim().length() > 0 && !it.trim().startsWith("at ") }
+    def budget = 9
+    def picked = chainLines.size() <= budget ? chainLines :
+        (chainLines.take(3) + chainLines[chainLines.size() - (budget - 3)..-1])
+    picked.each { c ->
+        println("::error::mordchain[" + (n++) + "][" + label.take(16) + "] " + c.trim().replace("::", "-").take(4900))
     }
     def cur = new StringBuilder()
     def chunks = []
