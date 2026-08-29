@@ -19,7 +19,9 @@ use tokio::net::UdpSocket;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
-use crate::config::{DISCOVERY_MULTICAST_GROUP, DISCOVERY_MULTICAST_PORT, MDNS_SERVICE_TYPE};
+use crate::config::{DISCOVERY_MULTICAST_GROUP, DISCOVERY_MULTICAST_PORT};
+#[cfg(not(target_os = "android"))]
+use crate::config::MDNS_SERVICE_TYPE;
 use crate::error::{EngineError, Result};
 
 /// An advertised peer (the payload of a discovery packet).
