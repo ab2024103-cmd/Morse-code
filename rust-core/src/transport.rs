@@ -103,6 +103,7 @@ fn default_transport_config() -> quinn::TransportConfig {
 
 /// Verifier that accepts any server certificate. Used ONLY on the ephemeral
 /// discovery path; TLS 1.3 is still fully negotiated.
+#[derive(Debug)]
 pub struct SkipServerVerification;
 
 impl ServerCertVerifier for SkipServerVerification {

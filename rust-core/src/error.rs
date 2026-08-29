@@ -64,8 +64,10 @@ impl From<quinn::ReadError> for EngineError {
     }
 }
 
-impl From<quinn::FinishError> for EngineError {
-    fn from(e: quinn::FinishError) -> Self {
+// quinn::SendStream::finish() -> Result<(), quinn::ClosedStream> (0.11 API;
+// there is no re-exported quinn::FinishError).
+impl From<quinn::ClosedStream> for EngineError {
+    fn from(e: quinn::ClosedStream) -> Self {
         Self::Transport(format!("finish: {e}"))
     }
 }

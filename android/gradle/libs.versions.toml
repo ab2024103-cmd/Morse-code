@@ -5,6 +5,9 @@ coreKtx = "1.13.1"
 appcompat = "1.7.0"
 material = "1.12.0"
 recyclerview = "1.3.2"
+# recyclerview-selection is a separate artifact on its own version track
+# (stable 1.2.0); it does NOT follow the recyclerview version number.
+recyclerviewSelection = "1.2.0"
 lifecycle = "2.8.4"
 coil = "2.6.0"
 media3 = "1.3.1"
@@ -18,7 +21,7 @@ androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx"
 androidx-appcompat = { module = "androidx.appcompat:appcompat", version.ref = "appcompat" }
 material = { module = "com.google.android.material:material", version.ref = "material" }
 androidx-recyclerview = { module = "androidx.recyclerview:recyclerview", version.ref = "recyclerview" }
-androidx-recyclerview-selection = { module = "androidx.recyclerview:recyclerview-selection", version.ref = "recyclerview" }
+androidx-recyclerview-selection = { module = "androidx.recyclerview:recyclerview-selection", version.ref = "recyclerviewSelection" }
 androidx-lifecycle-runtime = { module = "androidx.lifecycle:lifecycle-runtime-ktx", version.ref = "lifecycle" }
 androidx-lifecycle-viewmodel = { module = "androidx.lifecycle:lifecycle-viewmodel-ktx", version.ref = "lifecycle" }
 androidx-lifecycle-service = { module = "androidx.lifecycle:lifecycle-service", version.ref = "lifecycle" }

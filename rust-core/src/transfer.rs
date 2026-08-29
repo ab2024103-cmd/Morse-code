@@ -55,7 +55,9 @@ pub async fn serve(ctx: ServeContext) -> Result<()> {
     while let Some(incoming) = ctx.endpoint.accept().await {
         let ctx = ctx.clone_for_connection();
         tokio::spawn(async move {
-            match incoming.accept().await {
+            // quinn 0.11: Endpoint::accept yields an `Incoming`; it is directly
+            // awaitable (IncomingFuture) and resolves to a `Connection`.
+            match incoming.await {
                 Ok(connection) => {
                     if let Err(e) = handle_incoming_connection(connection, ctx).await {
                         tracing::warn!("inbound transfer failed: {e}");

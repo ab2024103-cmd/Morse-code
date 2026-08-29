@@ -75,7 +75,11 @@ impl From<CoreError> for EngineError {
 
 /// Callback interface implemented on the native (Kotlin/Swift/JS) side and
 /// invoked from the engine's worker threads.
-#[uniffi::export(callback_interface)]
+///
+/// UniFFI 0.28 uses `#[uniffi::export(with_foreign)]` for foreign-implemented
+/// traits (the older `callback_interface` name does not emit the
+/// `FfiConverterArc` impl needed to pass `Arc<dyn Trait>` into exported fns).
+#[uniffi::export(with_foreign)]
 pub trait TransferObserver: Send + Sync {
     fn on_progress(&self, stream_id: u64, bytes_done: u64, bytes_total: u64);
     fn on_peer_discovered(&self, peer_id: String, peer_name: String, addr: String);
@@ -184,7 +188,13 @@ impl TransferEngine {
                 receive_dir,
                 sink,
             };
-            tokio::spawn(serve(ctx))
+            // Wrap so the JoinHandle output type is `()`, matching
+            // `serve_handle: AsyncMutex<Option<JoinHandle<()>>>`.
+            tokio::spawn(async move {
+                if let Err(e) = serve(ctx).await {
+                    tracing::warn!("serve loop stopped: {e}");
+                }
+            })
         });
         let local_port = endpoint.local_addr().map(|a| a.port()).unwrap_or(0);
         self.endpoint = Some(endpoint);
