@@ -8,6 +8,7 @@ import com.morselink.app.permission.PermissionOrchestrator
 import com.morselink.app.transfer.TransferController
 import com.morselink.feature.filebrowser.MediaBrowserFragment
 import com.morselink.feature.filebrowser.MediaFileItem
+import com.morselink.feature.filebrowser.MediaKind
 
 /**
  * Navigation shell. Classic Views architecture (no Compose) for low-end

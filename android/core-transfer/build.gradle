@@ -62,11 +62,16 @@ def buildRust = tasks.register("buildRust", Exec) {
         "mkdir -p \"$kotlinOut\" && cp -r \"\$TMP/.\" \"$kotlinOut/\" && rm -rf \"\$TMP\"")
 }
 
-// Lazy wiring: ensure buildRust runs before any task that needs the .so in
-// src/main/jniLibs (preBuild and every JNI-lib merge/packaging task). Using
-// configureEach avoids the "task not found" crash from tasks.named(...).
+// Lazy wiring: ensure buildRust runs before any task that needs its outputs —
+// the .so in src/main/jniLibs AND the generated UniFFI Kotlin bindings in
+// src/main/java/kotlin. The latter are compiled by compile*Kotlin, so those
+// tasks must run after buildRust too; otherwise compileDebugKotlin snapshots an
+// empty source dir (NO-SOURCE) and the app never sees the morselink_core
+// package. Using configureEach avoids the "task not found" crash from
+// tasks.named(...).
 tasks.configureEach {
     if (name == "preBuild" ||
+        name.startsWith("compile") ||
         (name.startsWith("merge") && name.contains("JniLibFolders")) ||
         (name.startsWith("merge") && name.contains("NativeLibs"))) {
         dependsOn(buildRust)

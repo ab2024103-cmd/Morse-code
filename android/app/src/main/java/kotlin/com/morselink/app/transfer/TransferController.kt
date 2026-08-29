@@ -25,8 +25,5 @@ object TransferController {
         }
         // TODO(enqueue): pass `uris` to the engine once a peer is selected via
         // discovery. The native core accepts a list of content:// URIs.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val _ = uris
-        }
     }
 }
