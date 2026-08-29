@@ -1,6 +1,7 @@
 package com.morselink.feature.filebrowser
 
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.ViewGroup
 import androidx.recyclerview.selection.ItemDetailsLookup
 import androidx.recyclerview.selection.ItemKeyProvider
@@ -125,8 +126,11 @@ class MediaKeyProvider(private val adapter: MediaFileAdapter) :
 class MediaItemDetailsLookup(private val recyclerView: RecyclerView) :
     ItemDetailsLookup<String>() {
 
-    override fun getItemDetails(position: Int): ItemDetails<String>? {
-        val holder = recyclerView.findViewHolderForAdapterPosition(position) ?: return null
+    override fun getItemDetails(motionEvent: MotionEvent): ItemDetails<String>? {
+        val itemView =
+            recyclerView.findChildViewUnder(motionEvent.x, motionEvent.y) ?: return null
+        val position = recyclerView.getChildAdapterPosition(itemView)
+        if (position == RecyclerView.NO_POSITION) return null
         val adapter = recyclerView.adapter as? MediaFileAdapter ?: return null
         return object : ItemDetails<String>() {
             override fun getPosition(): Int = position

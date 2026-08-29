@@ -116,7 +116,7 @@ pub struct TransferEngine {
     config: crate::config::EngineConfig,
     node_id: String,
     sink: Arc<SinkBridge>,
-    endpoint: Option<quinn::Endpoint>,
+    endpoint: Mutex<Option<quinn::Endpoint>>,
     serve_handle: AsyncMutex<Option<tokio::task::JoinHandle<()>>>,
     discovery: AsyncMutex<Option<DiscoveryHandle>>,
     receive_dir: PathBuf,
@@ -151,7 +151,7 @@ impl TransferEngine {
             config: core,
             node_id,
             sink,
-            endpoint: None,
+            endpoint: Mutex::new(None),
             serve_handle: AsyncMutex::new(None),
             discovery: AsyncMutex::new(None),
             receive_dir: default_receive_dir(),
@@ -180,11 +180,16 @@ impl TransferEngine {
 
         let rt = &self.runtime;
         let endpoint_clone = endpoint.clone();
+        // Clone just the ids so the serve task can own them while the originals
+        // stay in scope for the discovery block below. `receive_dir`/`sink` are
+        // only used by the serve task, so move them in directly.
+        let node_id_serve = node_id.clone();
+        let device_name_serve = device_name.clone();
         let handle = rt.block_on(async move {
             let ctx = ServeContext {
                 endpoint: endpoint_clone,
-                node_id,
-                device_name,
+                node_id: node_id_serve,
+                device_name: device_name_serve,
                 receive_dir,
                 sink,
             };
@@ -197,7 +202,7 @@ impl TransferEngine {
             })
         });
         let local_port = endpoint.local_addr().map(|a| a.port()).unwrap_or(0);
-        self.endpoint = Some(endpoint);
+        *self.endpoint.lock().unwrap() = Some(endpoint);
         {
             let mut g = rt.block_on(self.serve_handle.lock());
             *g = Some(handle);
@@ -262,6 +267,9 @@ impl TransferEngine {
         let node_id = self.node_id.clone();
         let device_name = self.config.device_name.clone();
         let sink = self.sink.clone();
+        // Capture the size before `file_meta` is moved into the spawned task;
+        // it is needed again when constructing the returned snapshot.
+        let file_size = file_meta.size;
         let files = vec![file_meta];
         let paths = vec![PathBuf::from(&path)];
 
@@ -276,7 +284,7 @@ impl TransferEngine {
         Ok(TransferProgress {
             stream_id: 0,
             bytes_done: 0,
-            bytes_total: file_meta.size,
+            bytes_total: file_size,
             fraction: 0.0,
             status: "queued".into(),
         })

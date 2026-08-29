@@ -79,7 +79,7 @@ class MediaBrowserFragment : Fragment(R.layout.fragment_media_browser) {
                 MediaItemDetailsLookup(binding.recycler),
                 StorageStrategy.createStringStorage()
             )
-                .withPredicates(SelectionPredicates.Builder<String>().build())
+                .withSelectionPredicate(SelectionPredicates.createSelectAnything())
                 .build()
             newAdapter.attachSelection(tracker)
             this@MediaBrowserFragment.tracker = tracker
