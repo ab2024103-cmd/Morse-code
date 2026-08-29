@@ -25,20 +25,18 @@ dependencies {
 // compiled to this device's ABIs. It produces:
 //   - the shared library libmorselink_core.so (into src/main/jniLibs), and
 //   - the UniFFI Kotlin bindings (package `morselink_core`) into a generated
-//     source directory under build/generated/uniffi/<variant>.
+//     source directory under build/generated/uniffi/main.
 //
-// The UniFFI Kotlin bindings are added to the ANDROID source set matching the
-// variant name (android.sourceSets["debug"/"release"].java.srcDir(...)). KGP's
-// Android plugin mirrors those srcDirs into compile<Variant>Kotlin, so the .kt
-// files land in this module's classes.jar and downstream modules resolve the
-// `morselink_core` package. (Registering through AGP's variant.sources.java
-// pipeline does NOT work: that only feeds javac, which ignores .kt files, and
-// the bindings then never reach any compiler.) The srcDir registration is lazy,
-// and the compile task explicitly dependsOn the generating task.
-//
-// AGP requires each variant's generated-source directory to be distinct, so we
-// register a per-variant `buildRust<BuildType>` task. The underlying cargo build
-// is cached, so the second variant's run is cheap.
+// The bindings are added to the main android source set (java.srcDir inside
+// android{}, at configuration time). KGP's Android integration compiles *.kt
+// files found in java srcDirs, so the bindings land in this module's
+// classes.jar and every consumer module resolves `morselink_core` through the
+// normal project dependency. A single shared task/directory serves all
+// variants: the bindings are variant-independent, and one generating task
+// avoids two tasks declaring the same @OutputDirectory. (Registering through
+// AGP's variant.sources.java pipeline does NOT work: that only feeds javac,
+// which ignores .kt files. And doing it from androidComponents.onVariants is
+// too late for KGP's source-set sync.)
 //
 // The bindgen CLI is `uniffi-bindgen`, built on the fly from the in-repo
 // rust-core/bindgen crate (pinned to uniffi = 0.28.0). Skippable on dev boxes
@@ -51,9 +49,8 @@ abstract class RustBindgenTask extends DefaultTask {
     @Input
     abstract ListProperty<String> getAbis()
 
-    // Destination of the generated UniFFI Kotlin bindings -> registered as a
-    // generated Kotlin source dir via the Variant API. This is per-variant so
-    // each variant gets its own distinct generated-source directory.
+    // Destination of the generated UniFFI Kotlin bindings -> registered on the
+    // main android source set (see android.sourceSets below).
     @OutputDirectory
     abstract DirectoryProperty getBindingsDir()
 
@@ -135,54 +132,38 @@ abstract class RustBindgenTask extends DefaultTask {
 def rustCoreDirPath = rootProject.file("../rust-core").absolutePath
 def abiList = ["armeabi-v7a", "arm64-v8a", "x86_64"]
 
-// Accumulated per-variant buildRust providers, used to keep the .so merge tasks
-// ordering-correct (see tasks.configureEach below).
-def buildRustTasks = []
+def buildRust = tasks.register("buildRust", RustBindgenTask) {
+    description = "Compile the shared Rust core with cargo-ndk and generate UniFFI bindings"
+    group = "build"
+    rustCoreDir.set(rustCoreDirPath)
+    abis.set(abiList)
+    bindingsDir.set(layout.buildDirectory.dir("generated/uniffi/main"))
+    onlyIf { System.getenv("MORSELINK_SKIP_NATIVE") == null }
+}
 
-androidComponents {
-    onVariants(selector().all()) { variant ->
-        def taskName = "buildRust${variant.name.capitalize()}"
-        def buildRust = tasks.register(taskName, RustBindgenTask) {
-            description = "Compile the shared Rust core with cargo-ndk and generate UniFFI bindings"
-            group = "build"
-
-            rustCoreDir.set(rustCoreDirPath)
-            abis.set(abiList)
-            bindingsDir.set(layout.buildDirectory.dir("generated/uniffi/${variant.name}"))
-
-            onlyIf { System.getenv("MORSELINK_SKIP_NATIVE") == null }
-        }
-
-        // Register the generated UniFFI Kotlin bindings as a real source root
-        // for THIS variant. Key detail: the Kotlin Android plugin (KGP 1.9)
-        // compiles the union of the *android source set* java srcDirs for each
-        // variant — it does NOT pull in directories registered through AGP's
-        // variant.sources.java pipeline (that one only feeds javac, which
-        // ignores *.kt). So we add the generated dir to the android source set
-        // named after the build type ("debug"/"release"); KGP mirrors those
-        // into the matching compile<Variant>Kotlin task, the .kt files are
-        // compiled into this module's classes.jar, and downstream modules (:app)
-        // can resolve the `morselink_core` package. The srcDir is lazy, so the
-        // files only having to exist at execution time is fine.
-        android.sourceSets.getByName(variant.name).java.srcDir(
-            layout.buildDirectory.dir("generated/uniffi/${variant.name}"))
-
-        // Make this variant's Kotlin compile depend on the generating task so
-        // the sources exist when the compiler snapshots its inputs.
-        tasks.matching { it.name == "compile${variant.name.capitalize()}Kotlin" }
-             .configureEach { dependsOn(buildRust) }
-
-        buildRustTasks += buildRust
+// Everything that could consume generated sources or the packaged .so must run
+// after buildRust. Matching by name (not registering on specific tasks) keeps
+// this immune to KGP/AGP task-creation ordering; a Provider defers resolution
+// of the dependency until execution planning.
+tasks.configureEach { t ->
+    def n = t.name
+    if (n.startsWith("compile") && n.endsWith("Kotlin") ||
+        n == "preBuild" ||
+        (n.startsWith("merge") && (n.contains("JniLibFolders") || n.contains("NativeLibs")))) {
+        t.dependsOn(buildRust)
     }
 }
 
-// The generated .so lives in src/main/jniLibs; AGP packages it when the library
-// merge tasks run. Ensure buildRust has run before those tasks so libmorselink
-// _core.so is present. Using configureEach avoids the "task not found" crash
-// from tasks.named(...) on a com.android.library module in AGP 8.x.
-tasks.configureEach {
-    if (name == "preBuild" ||
-        (name.startsWith("merge") && (name.contains("JniLibFolders") || name.contains("NativeLibs")))) {
-        dependsOn(buildRustTasks)
-    }
-}
+// Make the generated UniFFI Kotlin bindings part of THIS library's compiled
+// output (classes.jar) so every consumer module (the :app and feature
+// modules) resolves the `morselink_core` package through the normal project
+// dependency. This registration lives inside android{} — configuration time,
+// strictly before KGP's afterEvaluate source-set sync (the androidComponents
+// onVariants callback we used before runs too late for that, which is why
+// morselink_core stayed unresolved). Files appearing at execution time are
+// fine: KotlinCompile snapshots sources when it runs, and the dependsOn above
+// orders buildRust ahead of it. The repo-wide convention of compiling *.kt
+// from java srcDirs is what this rides on (documented in gradle docs: KGP's
+// Android integration adds the java srcDirs to the Kotlin source sets).
+android.sourceSets.getByName("main").java.srcDir(
+    layout.buildDirectory.dir("generated/uniffi/main"))
