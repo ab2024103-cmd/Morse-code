@@ -30,6 +30,10 @@ REPO="${GITHUB_REPOSITORY:-}"
 
 say() {
   printf '%s\n' "$*"
+  # Echo as a check-run annotation too: from the agent sandbox the
+  # annotations API is the only reliably readable channel (job summaries and
+  # raw logs may be unavailable).
+  printf '::error::publish-release: %s\n' "${*//::/--}"
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ] && [ -w "${GITHUB_STEP_SUMMARY:-/nonexistent}" ]; then
     { printf '> %s\n' "$*"; } >> "$GITHUB_STEP_SUMMARY"
   fi
