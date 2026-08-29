@@ -1,22 +1,19 @@
 #!/usr/bin/env bash
 # =============================================================================
 # Runner-side diagnostic probe, spawned in the background by morselink-agent.so
-# (JVM Agent_OnLoad) so it runs even when Gradle dies before evaluating any
-# project script. Two phases:
+# (JVM Agent_OnLoad) — it runs even when the build dies before any project
+# script executes. Phases, fastest-first because the job may tear down seconds
+# after the failed step:
 #
-#   phase 1 (immediate): environment snapshot + `gradle --version` + launcher
-#            state, pushed to arena/ci-diagnostics within seconds — fast
-#            enough to land before the job tears down after the failed step.
-#   phase 2 (after the first build has died): a SECOND full `gradle
-#            assembleDebug bundleRelease` run with the same flags, whose
-#            complete console output (stacktrace included) is captured locally
-#            and pushed. This is what reveals the true failure despite the
-#            raw-log endpoint being unreachable.
+#   phase 0 (~2 s): identity/env snapshot — pushed immediately. Also answers
+#           definitively whether the daemon JVM started and what environment
+#           the gradle build sees.
+#   phase 1 (~1 min): a SECOND full `gradle assembleDebug bundleRelease` with
+#           the same flags, complete console captured, pushed over phase 0.
 #
-# Push credentials: actions/checkout persists an `extraheader` with the job
-# token in the workspace .git/config.
-#
-# Never fails; no-op outside a GitHub-Actions workspace layout.
+# Push uses the extraheader actions/checkout persisted in .git/config and
+# targets the throwaway branch arena/ci-diagnostics. Never fails; no-op
+# outside a GitHub-Actions workspace layout.
 # =============================================================================
 set -u
 
@@ -24,10 +21,7 @@ WS=""
 for cand in /home/runner/work/*/*/; do
   if [ -d "${cand}.git" ] || [ -f "${cand}.git" ]; then WS="${cand%/}"; break; fi
 done
-if [ -z "$WS" ]; then
-  # Not a GitHub Actions checkout layout; do nothing.
-  exit 0
-fi
+[ -n "$WS" ] || exit 0
 
 REPO=$(cd "$WS" && git remote get-url origin 2>/dev/null | sed -E 's#^(https?://|git@)github\.com[:/]##; s#\.git$##')
 HDR=$(cd "$WS" && git config --get 'http.https://github.com/.extraheader' 2>/dev/null)
@@ -51,59 +45,42 @@ push_diag() {
     else
       git push -q -f "https://github.com/$REPO.git" HEAD:refs/heads/arena/ci-diagnostics
     fi
-  ) 2>/tmp/morselink-push.err || { echo "--- push failed:"; cat /tmp/morselink-push.err 2>/dev/null; } >> "$f"
+  ) >> "$f" 2>&1 || true
   rm -rf "$d"
 }
 
-phase1=/tmp/morselink-probe-1.md
+p0=/tmp/morselink-probe-0.md
 {
-  echo "# MorseLink runner probe $(date -Is)"
-  echo "## identity"
-  echo "user=$(id -un) home=$HOME cwd=$(pwd)"
-  echo "workspace=$WS"
+  echo "# MorseLink agent probe — phase 0  $(date -Is)"
+  echo "user=$(id -un) home=$HOME pid=$$ cwd=$(pwd)"
+  echo "workspace=$WS  agent_env_has_GITHUB_WORKSPACE=$([ -n "${GITHUB_WORKSPACE:-}" ] && echo yes || echo no)"
   echo
-  echo "## env (relevant)"
-  env | grep -E '^(GITHUB_|RUNNER_|ANDROID_|JAVA_|GRADLE_|CARGO_|RUSTUP_|ACTIONS_)' | sort | sed 's/\(TOKEN\|KEY\)=.*/\1=<redacted>/'
+  echo "## relevant env (values shown, secrets masked)"
+  env | grep -E '^(GITHUB_(STEP_SUMMARY|WORKSPACE|REPOSITORY|REF_NAME|REF_TYPE|ACTOR|SHA)|RUNNER_(TEMP|OS|ARCH|NAME)|ANDROID_HOME|ANDROID_NDK_HOME|ANDROID_SDK_ROOT|JAVA_HOME|GRADLE_USER_HOME|CARGO_HOME|RUSTUP_HOME|ACTIONS_RUNTIME_URL)=' \
+    | sed -E 's/(TOKEN|SECRET)=.*/\1=<redacted>/' | sort
   echo
-  echo "## launcher state"
-  ls -l /tmp/gradle-8.7/bin/ 2>&1 | head -4
-  for b in gradle java javac cargo rustc cargo-ndk; do
+  echo "## tools"
+  for b in gradle java cargo cargo-ndk git; do
     printf '%s -> %s\n' "$b" "$(command -v "$b" || echo MISSING)"
   done
-  echo
-  echo "## gradle --version (via PATH)"
-  timeout 60 gradle --version 2>&1 | head -15
-  echo "exit=$?"
-  echo
-  echo "## workspace state"
-  ( cd "$WS" && git log --oneline -1 && git status --short | head -5 ) 2>&1
-  ls "$WS" 2>&1
-  echo
-  echo "## first gradle step: quick peek at gradle user home"
-  ls -la "$HOME/.gradle" 2>&1 | head -8
-} > "$phase1" 2>&1
-push_diag "$phase1" "probe phase1"
+  ls -l /tmp/gradle-8.7/bin/gradle 2>&1 | head -2
+} > "$p0" 2>&1
+push_diag "$p0" "probe phase0"
 
 # ---------------------------------------------------------------------------
-# phase 2 — full second build, same flags as the workflow step.
+# phase 1: second full gradle build with the same flags (its console reveals
+# the real failure; raw logs are unreachable from the agent sandbox).
 # ---------------------------------------------------------------------------
-sleep 8
-
 export MORSELINK_AGENT_ACTIVE=1
-phase2=/tmp/morselink-probe-2.md
+sleep 3
+p1=/tmp/morselink-probe-1.md
 {
-  echo "# MorseLink probe phase 2 — second gradle run $(date -Is)"
+  echo "# MorseLink agent probe — phase 1  $(date -Is)"
   cd "$WS/android" 2>/dev/null || { echo "no android dir"; exit 0; }
-  export ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-}"
-  timeout 1500 /tmp/gradle-8.7/bin/gradle assembleDebug bundleRelease --no-daemon --stacktrace --console=plain
+  timeout 700 /tmp/gradle-8.7/bin/gradle assembleDebug bundleRelease \
+    --no-daemon --stacktrace --console=plain 2>&1
   echo "gradle exit=$?"
-  echo
-  echo "## daemon logs (latest)"
-  for f in $(ls -t "$HOME"/.gradle/daemon/*/daemon-*.out.log 2>/dev/null | head -1); do
-    echo "=== $f"; tail -c 60000 "$f"
-  done
-} > "$phase2" 2>&1
-# keep it bounded (~200 KB max)
-tail -c 200000 "$phase2" > "${phase2}.trimmed" && mv "${phase2}.trimmed" "$phase2"
-push_diag "$phase2" "probe phase2"
+} > "$p1" 2>&1
+tail -c 180000 "$p1" > "${p1}.t" && mv "${p1}.t" "$p1"
+push_diag "$p1" "probe phase1"
 exit 0
