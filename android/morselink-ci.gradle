@@ -47,8 +47,8 @@ def mlChain = { Throwable fail ->
     def t = fail
     for (int i = 0; i < 8 && t != null; i++) {
         String msg = String.valueOf(t.toString())
-        if (msg.length() > 2600) {
-            msg = msg.substring(0, 2600) + " ...[cut]"
+        if (msg.length() > 4800) {
+            msg = msg.substring(0, 4800) + " ...[cut]"
         }
         out.append(i == 0 ? "FAILURE: " : "Caused by: ").append(msg).append("\n")
         try {
@@ -176,10 +176,17 @@ def mlReport = { String label, String chain, String tail ->
         }
     }
     int n = 0
+    // The chain messages carry the actionable text (AAPT2 / kotlinc detail is
+    // inside the exception messages) — send them FIRST, one annotation each.
+    chain.readLines().findAll { it.trim().length() > 0 }.each { c ->
+        if (n < 6) {
+            println("::error::mordchain[" + (n++) + "][" + label.take(16) + "] " + c.trim().replace("::", "-").take(4900))
+        }
+    }
     def cur = new StringBuilder()
     def chunks = []
     errLines.each { l ->
-        if (cur.length() + l.length() + 3 > 3200) {
+        if (cur.length() + l.length() + 3 > 3000) {
             chunks.add(cur.toString())
             cur = new StringBuilder()
         }
@@ -188,20 +195,9 @@ def mlReport = { String label, String chain, String tail ->
     if (cur.length() > 0) {
         chunks.add(cur.toString())
     }
-    if (chunks.isEmpty()) {
-        def lines = full.readLines()
-        for (int i = 0; i < lines.size() && n < 6; i++) {
-            def l = lines.get(i).trim()
-            if (l.length() > 0) {
-                mlAnn("mordiag[" + (n++) + "][" + label.take(16) + "] " + l)
-            }
-        }
-    } else {
-        def shown = new HashSet()
-        def uniq = chunks.collect { c -> c.toString().replace("::", "-") }.findAll { shown.add(it) }
-        uniq.take(9 - n).each { c ->
-            println("::error::morderr[" + label.take(16) + "][" + (n++) + "] " + c.take(3400))
-        }
+    def seenChain = new HashSet()
+    chunks.collect { c -> c.toString().replace("::", "-") }.findAll { seenChain.add(it) }.take(9 - n).each { c ->
+        println("::error::morderr[" + label.take(16) + "][" + (n++) + "] " + c.take(3200))
     }
     def pushNote = mlPushDiag(label, full)
     mlAppend("push note: " + pushNote + "\n")
