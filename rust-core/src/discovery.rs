@@ -180,6 +180,12 @@ async fn parse_and_track(
 
 /// mDNS advertisement (secondary). Registers a `_morselink._udp.local` instance
 /// so OS-native discovery tools can find the device too.
+///
+/// Only compiled on desktop/host targets. On Android the OS manages mDNS
+/// natively (NsdManager), and `mdns-sd` pulls in `if-addrs`, which links against
+/// `getifaddrs`/`freeifaddrs` symbols that are not available when targeting
+/// Android — so Android gets a no-op instead.
+#[cfg(not(target_os = "android"))]
 pub async fn advertise_mdns(device_name: &str, port: u16) -> Result<()> {
     if !MDNS_SERVICE_TYPE.contains("_udp") {
         // defensive; never hit in practice
@@ -203,6 +209,13 @@ pub async fn advertise_mdns(device_name: &str, port: u16) -> Result<()> {
     // Keep the daemon alive for the lifetime of the process; it is tied to our
     // runtime so returning here is safe (daemon runs on its own thread).
     std::mem::forget(service);
+    Ok(())
+}
+
+/// Android no-op: the platform's NsdManager handles mDNS. Kept so callers
+/// (`ffi.rs`, `bin/morselink.rs`) compile identically on all targets.
+#[cfg(target_os = "android")]
+pub async fn advertise_mdns(_device_name: &str, _port: u16) -> Result<()> {
     Ok(())
 }
 

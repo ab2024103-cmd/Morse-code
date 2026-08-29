@@ -8,7 +8,9 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.util.Rational
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.IntentCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -26,7 +28,14 @@ class VideoPlayerActivity : AppCompatActivity(R.layout.activity_video_player) {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val uri = intent.getParcelableExtra<Uri>(EXTRA_URI)
+        // IntentCompat avoids the deprecated getParcelableExtra(String) and
+        // returns a nullable Uri? — guard it before handing to Media3.
+        val uri = IntentCompat.getParcelableExtra(intent, EXTRA_URI, Uri::class.java)
+        if (uri == null) {
+            Toast.makeText(this, R.string.video_missing_uri, Toast.LENGTH_SHORT).show()
+            finish()
+            return
+        }
         playerView = findViewById(R.id.player_view)
 
         val p = ExoPlayer.Builder(this).build()
