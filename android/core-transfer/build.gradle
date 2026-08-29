@@ -87,8 +87,8 @@ abstract class RustBindgenTask extends DefaultTask {
     }
 }
 
-def rustCoreDir = rootProject.file("../rust-core").absolutePath
-def abis = ["armeabi-v7a", "arm64-v8a", "x86_64"]
+def rustCoreDirPath = rootProject.file("../rust-core").absolutePath
+def abiList = ["armeabi-v7a", "arm64-v8a", "x86_64"]
 
 // Accumulated per-variant buildRust providers, used to keep the .so merge tasks
 // ordering-correct (see tasks.configureEach below).
@@ -101,8 +101,8 @@ androidComponents {
             description = "Compile the shared Rust core with cargo-ndk and generate UniFFI bindings"
             group = "build"
 
-            rustCoreDir.set(rustCoreDir)
-            abis.set(abis)
+            rustCoreDir.set(rustCoreDirPath)
+            abis.set(abiList)
             bindingsDir.set(layout.buildDirectory.dir("generated/uniffi/${variant.name}"))
 
             onlyIf { System.getenv("MORSELINK_SKIP_NATIVE") == null }
