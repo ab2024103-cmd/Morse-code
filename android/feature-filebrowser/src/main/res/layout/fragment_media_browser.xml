@@ -33,5 +33,5 @@
         android:layout_margin="16dp"
         android:visibility="gone"
         app:icon="@drawable/ic_tab_file"
-        app:text="@string/send_selected" />
+        android:text="@string/send_selected" />
 </androidx.coordinatorlayout.widget.CoordinatorLayout>
