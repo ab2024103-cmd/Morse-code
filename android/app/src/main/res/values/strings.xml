@@ -1,0 +1,33 @@
+<resources>
+    <string name="app_name">MorseLink</string>
+
+    <!-- Bottom navigation -->
+    <string name="tab_photos">Photos</string>
+    <string name="tab_videos">Videos</string>
+    <string name="tab_music">Music</string>
+    <string name="tab_docs">Docs</string>
+    <string name="tab_files">Files</string>
+    <string name="tab_transfer">Transfer</string>
+
+    <!-- Permissions -->
+    <string name="perm_location_title">Access nearby devices</string>
+    <string name="perm_location_body">MorseLink uses your location to discover other devices on your Wi-Fi network. This is needed only to list nearby devices during a transfer — your location is never sent anywhere.</string>
+    <string name="perm_bluetooth_title">Bluetooth access</string>
+    <string name="perm_bluetooth_body">Bluetooth is used to discover nearby devices. MorseLink does not collect or share Bluetooth data.</string>
+    <string name="perm_notifications_title">Transfer notifications</string>
+    <string name="perm_notifications_body">Show progress when sending or receiving files in the background.</string>
+    <string name="perm_storage_title">Access your files</string>
+    <string name="perm_storage_body">MorseLink needs to read the files you choose to send and write files you receive, using Android\'s MediaStore.</string>
+
+    <string name="allow">Allow</string>
+    <string name="deny">Not now</string>
+    <string name="next">Continue</string>
+
+    <string name="send_selected">Send [%1$d]</string>
+    <string name="select_hint">Tap a photo to open it · long-press to select</string>
+    <string name="empty_folder">Nothing here yet</string>
+
+    <string name="service_channel_transfer">File transfers</string>
+    <string name="service_channel_desc">Progress for sending and receiving files</string>
+    <string name="transfer_ongoing">Transferring files…</string>
+</resources>

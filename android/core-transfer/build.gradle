@@ -1,0 +1,61 @@
+plugins {
+    id "com.android.library"
+    id "org.jetbrains.kotlin.android"
+}
+
+android {
+    namespace = "com.morselink.coretransfer"
+    compileSdk = 35
+
+    defaultConfig {
+        minSdk = 23
+        targetSdk = 35
+        ndk {
+            // Required for legacy 32-bit Android 6.0 devices.
+            abiFilters.addAll(["armeabi-v7a", "arm64-v8a", "x86_64"])
+        }
+    }
+
+    sourceSets.main.java.srcDirs("src/main/java/kotlin")
+}
+
+dependencies {
+}
+
+// ---------------------------------------------------------------------------
+// Rust core build (shared engine). Consumes the SAME crate the desktop app uses,
+// compiled to this device's ABIs and producing the UniFFI Kotlin bindings at
+// src/main/java/kotlin. Skippable on dev boxes by exporting MORSELINK_SKIP_NATIVE.
+// ---------------------------------------------------------------------------
+def rustCoreDir = rootProject.file("../rust-core")
+def jniLibsDir = file("src/main/jniLibs")
+def genKotlinDir = file("src/main/java/kotlin")
+def abis = ["armeabi-v7a", "arm64-v8a", "x86_64"]
+
+def buildRust = tasks.register("buildRust", Exec) {
+    description = "Compile the shared Rust core with cargo-ndk and generate UniFFI bindings"
+    group = "build"
+    workingDir = rustCoreDir
+
+    def abiArgs = abis.collect { "-t $it" }.join(" ")
+    def libsOut = jniLibsDir.absolutePath
+    def kotlinOut = genKotlinDir.absolutePath
+
+    // "$" here are SHELL variables; they're escaped with a backslash so Groovy
+    // does not try to interpolate them.
+    commandLine("bash", "-lc",
+        "set -euo pipefail && " +
+        "cargo ndk $abiArgs -o $libsOut build --release --features ffi && " +
+        "SO=$(find $libsOut -name 'libmorselink_core.so' | head -n1) && " +
+        "uniffi-bindgen --library \"\$SO\" --language kotlin --out-dir $kotlinOut/morselink_core")
+}
+
+tasks.named("preBuild") {
+    dependsOn(buildRust)
+    onlyIf { System.getenv("MORSELINK_SKIP_NATIVE") == null }
+}
+
+tasks.named("mergeDebugJniLibFolders") {
+    dependsOn(buildRust)
+    onlyIf { System.getenv("MORSELINK_SKIP_NATIVE") == null }
+}

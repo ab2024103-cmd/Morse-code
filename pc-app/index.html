@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MorseLink — Desktop</title>
+    <link rel="stylesheet" href="/main.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <h1>MorseLink</h1>
+      <span class="subtitle">P2P file transfer over your Wi-Fi</span>
+      <span id="protocol" class="badge"></span>
+    </header>
+
+    <main>
+      <section class="card">
+        <h2>Receive</h2>
+        <p id="recv_status">Not receiving.</p>
+        <div class="row">
+          <label>Port <input id="recv_port" type="number" value="45843" /></label>
+          <label>Device name <input id="recv_name" type="text" value="My PC" /></label>
+          <button id="start_recv">Start receiving</button>
+          <button id="stop_recv" class="secondary">Stop</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Nearby devices</h2>
+        <ul id="peers" class="peers"></ul>
+        <button id="refresh_peers" class="secondary">Refresh</button>
+      </section>
+
+      <section class="card">
+        <h2>Send</h2>
+        <div id="dropzone" class="dropzone">
+          <p>Drag files here, or click to browse</p>
+          <input id="file_input" type="file" multiple hidden />
+        </div>
+        <ul id="queue" class="queue"></ul>
+        <div class="row">
+          <label>Peer address <input id="peer_addr" type="text" placeholder="192.168.1.20:45843" /></label>
+          <button id="send_btn">Send to peer</button>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="/main.js"></script>
+  </body>
+</html>

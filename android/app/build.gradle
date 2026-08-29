@@ -1,0 +1,66 @@
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.serialization")
+}
+
+android {
+    namespace = "com.morselink.app"
+    compileSdk = 35
+
+    defaultConfig {
+        applicationId = "com.morselink.app"
+        minSdk = 23
+        targetSdk = 35
+        versionCode = 1
+        versionName = "1.0.0"
+
+        ndk {
+            // Ship matching ABIs; the shared core is built into core-transfer.
+            abiFilters.addAll(["armeabi-v7a", "arm64-v8a", "x86_64"])
+        }
+    }
+
+    sourceSets["main"].java.srcDirs("src/main/java/kotlin")
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            shrinkResources false
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
+    }
+
+    buildFeatures {
+        viewBinding true
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+}
+
+dependencies {
+    implementation(project(":core-transfer"))
+    implementation(project(":feature-filebrowser"))
+    implementation(project(":feature-imageviewer"))
+    implementation(project(":feature-videoplayer"))
+    implementation(project(":feature-musicplayer"))
+    implementation(project(":feature-docviewer"))
+
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.appcompat)
+    implementation(libs.material)
+    implementation(libs.androidx.recyclerview)
+    implementation(libs.androidx.recyclerview.selection)
+    implementation(libs.androidx.lifecycle.runtime)
+    implementation(libs.androidx.lifecycle.viewmodel)
+    implementation(libs.androidx.lifecycle.service)
+    implementation(libs.androidx.activity.ktx)
+    implementation(libs.androidx.fragment.ktx)
+    implementation(libs.kotlinx.serialization.json)
+}

@@ -1,0 +1,62 @@
+[package]
+name = "morselink-core"
+version = "0.1.0"
+edition = "2021"
+description = "MorseLink shared P2P transfer engine (QUIC / TLS 1.3) for Android, desktop and web."
+license = "MIT"
+authors = ["MorseLink Contributors"]
+
+# -----------------------------------------------------------------------------
+# This is the single shared engine. It is compiled to:
+#   .so            -> Android (core-transfer module, via UniFFI/JNI)
+#   .dll / .dylib  -> Windows / macOS desktop (Tauri)
+#   .rlib          -> CLI / host binary / wasm experimental
+# -----------------------------------------------------------------------------
+[lib]
+name = "morselink_core"
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[[bin]]
+name = "morselink"
+path = "src/bin/morselink.rs"
+
+[dependencies]
+# QUIC transport (TLS 1.3 is native to QUIC - we add no custom crypto layer).
+# We explicitly enable the tokio runtime + ring crypto provider so that
+# Endpoint::client/server (which are cfg-gated on these features) are available.
+quinn = { version = "0.11", features = ["runtime-tokio", "ring"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+rcgen = "0.13"
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+# Serialisation for the control/metadata stream
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+bytes = "1"
+# Errors / logging / CLI
+thiserror = "1"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+clap = { version = "4", features = ["derive", "env"] }
+# Local network discovery
+mdns-sd = "0.11"
+# Universal FFI bindings for Android / desktop (optional; enable with `--features ffi`)
+uniffi = { version = "0.28", optional = true }
+
+[features]
+default = []
+# Produce the Kotlin/Python/Swift bindings + scaffolding for native shells.
+ffi = ["dep:uniffi"]
+# Experimental WebAssembly (WebRTC fallback) target.
+wasm = []
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+opt-level = "s"
+panic = "abort"
+strip = true
+
+[profile.dev]
+opt-level = 1

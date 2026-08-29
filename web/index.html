@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MorseLink — Web</title>
+    <link rel="stylesheet" href="/main.css" />
+  </head>
+  <body>
+    <header>
+      <h1>MorseLink · Web</h1>
+      <p>Browser-to-browser file transfer over WebRTC. No internet, no cloud.</p>
+    </header>
+
+    <main>
+      <section class="card">
+        <h2>1 · Connect</h2>
+        <p>
+          Since browsers block raw UDP sockets, this path uses WebRTC and
+          <strong>local-only</strong> signaling. First, pick a role. The sender
+          creates an offer, the receiver pastes it to answer. No signaling
+          server — everything stays on this device's network.
+        </p>
+        <div class="row">
+          <button id="create_file" class="primary">I'm the sender</button>
+          <button id="create_receive" class="secondary">I'm the receiver</button>
+        </div>
+      </section>
+
+      <section class="card" id="offer_panel" style="display:none">
+        <h2>Share this offer</h2>
+        <p>Copy the code below (or scan the QR with the other device).</p>
+        <textarea id="offer_text" rows="6" readonly></textarea>
+        <canvas id="qr_canvas" width="220" height="220"></canvas>
+      </section>
+
+      <section class="card" id="answer_panel" style="display:none">
+        <h2>Paste the sender's offer</h2>
+        <textarea id="remote_offer" rows="6"></textarea>
+        <button id="accept_offer" class="primary">Accept → create answer</button>
+        <div id="answer_block" style="display:none">
+          <p>Send this answer back to the sender:</p>
+          <textarea id="answer_text" rows="6" readonly></textarea>
+        </div>
+      </section>
+
+      <section class="card" id="send_panel" style="display:none">
+        <h2>2 · Send</h2>
+        <div id="dropzone">
+          <p>Drop files here, or click to browse</p>
+          <input id="file_input" type="file" multiple hidden />
+        </div>
+        <ul id="queue"></ul>
+      </section>
+
+      <section class="card" id="progress_panel" style="display:none">
+        <h2>3 · Transfer</h2>
+        <progress id="progress" value="0" max="1"></progress>
+        <p id="status_text">Waiting…</p>
+      </section>
+    </main>
+
+    <script type="module" src="/main.js"></script>
+  </body>
+</html>

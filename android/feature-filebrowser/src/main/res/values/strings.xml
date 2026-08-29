@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">MorseLink</string>
+    <string name="send_selected">Send [%1$d]</string>
+    <string name="empty_folder">Nothing here yet</string>
+</resources>

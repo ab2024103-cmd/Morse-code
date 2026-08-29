@@ -1,0 +1,31 @@
+# Rust
+/target
+**/*.rs.bk
+Cargo.lock.orig
+
+# Android / Gradle
+android/.gradle/
+android/build/
+android/**/build/
+android/local.properties
+android/.cxx/
+*.iml
+
+# Generated UniFFI / JNI bindings (produced by cargo-ndk + uniffi-bindgen)
+android/core-transfer/src/main/java/kotlin/morselink_core/
+android/core-transfer/src/main/jniLibs/
+
+# Node / Tauri
+pc-app/node_modules/
+pc-app/dist/
+pc-app/src-tauri/target/
+web/node_modules/
+web/dist/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea/
+.vscode/
