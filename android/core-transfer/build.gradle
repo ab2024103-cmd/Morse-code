@@ -172,6 +172,36 @@ echo "bindings OK: $(find "${MORSELINK_KOTLINOUT}" -name '*.kt' | wc -l) .kt fil
         } finally {
             os.close()
         }
+        if (exit == 0) {
+            // Echo the real shape of the generated API surface to the gradle
+            // console: the CI hook relays marked lines as annotations, which is
+            // our only runner->sandbox channel. Settles name-mismatch questions
+            // (e.g. how the uniffi::Error enum surfaces in Kotlin) in one run.
+            try {
+                def names = []
+                new File(kotlinOut).eachFileRecurse { f ->
+                    if (f.name.endsWith(".kt")) {
+                        f.eachLine { l ->
+                            def m = (l =~ /^(?:public |internal |open |sealed |data |value )*class (\w+)|^(?:public )?interface (\w+)/)
+                            if (m.find()) {
+                                def nm = m.group(1) ?: m.group(2)
+                                if (nm && !names.contains(nm)) {
+                                    names.add(nm)
+                                }
+                            }
+                        }
+                    }
+                }
+                def line = "MORSELINK-API classes: " + names.join(", ")
+                println(line)
+                def summary = System.getenv("GITHUB_STEP_SUMMARY")
+                if (summary) {
+                    new File(summary) << "\n" + line + "\n"
+                }
+            } catch (Throwable t) {
+                println("MORSELINK-API scan failed: " + t)
+            }
+        }
         if (exit != 0) {
             // Keep the throw-message small: the *last* lines are the ones with
             // the real error (cargo noise dominates the beginning). Gradle
