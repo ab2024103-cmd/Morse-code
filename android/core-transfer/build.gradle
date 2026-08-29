@@ -27,16 +27,14 @@ dependencies {
 //   - the UniFFI Kotlin bindings (package `morselink_core`) into a generated
 //     source directory under build/generated/uniffi/<variant>.
 //
-// The UniFFI Kotlin bindings are REGISTERED with the Kotlin compile source set
-// via the AGP Variant API (androidComponents.onVariants ->
-// variant.sources.kotlin.addGeneratedSourceDirectory), NOT via a static
-// java.srcDirs/kotlin.srcDir. AGP snapshots the Android source set at
-// configuration time; a directory that only gains *.kt files at execution time
-// (when buildRust runs) is invisible to a statically-registered source root, so
-// compile*Kotlin reports NO-SOURCE and the app never sees the `morselink_core`
-// package. addGeneratedSourceDirectory is AGP's mechanism for exactly this: it
-// both registers a directory as a Kotlin source root AND makes the compile task
-// depend on the generating task, so the generated bindings are always compiled.
+// The UniFFI Kotlin bindings are added to the ANDROID source set matching the
+// variant name (android.sourceSets["debug"/"release"].java.srcDir(...)). KGP's
+// Android plugin mirrors those srcDirs into compile<Variant>Kotlin, so the .kt
+// files land in this module's classes.jar and downstream modules resolve the
+// `morselink_core` package. (Registering through AGP's variant.sources.java
+// pipeline does NOT work: that only feeds javac, which ignores .kt files, and
+// the bindings then never reach any compiler.) The srcDir registration is lazy,
+// and the compile task explicitly dependsOn the generating task.
 //
 // AGP requires each variant's generated-source directory to be distinct, so we
 // register a per-variant `buildRust<BuildType>` task. The underlying cargo build
@@ -155,17 +153,24 @@ androidComponents {
             onlyIf { System.getenv("MORSELINK_SKIP_NATIVE") == null }
         }
 
-        // Register the generated UniFFI Kotlin bindings as a real source root for
-        // THIS variant, wired to the buildRust task. This is what makes
-        // compile*Kotlin see the generated `morselink_core` package instead of
-        // reporting NO-SOURCE (the earlier static srcDir approach could not see
-        // a directory populated only at execution time).
-        //
-        // We register on `sources.java` (not `sources.kotlin`) because AGP's
-        // Kotlin plugin compiles *.kt files that live in Java source
-        // directories, and `addGeneratedSourceDirectory` on the Kotlin source
-        // type has a known GL that can fail to invoke the generating task.
-        variant.sources.java?.addGeneratedSourceDirectory(buildRust) { it.bindingsDir }
+        // Register the generated UniFFI Kotlin bindings as a real source root
+        // for THIS variant. Key detail: the Kotlin Android plugin (KGP 1.9)
+        // compiles the union of the *android source set* java srcDirs for each
+        // variant — it does NOT pull in directories registered through AGP's
+        // variant.sources.java pipeline (that one only feeds javac, which
+        // ignores *.kt). So we add the generated dir to the android source set
+        // named after the build type ("debug"/"release"); KGP mirrors those
+        // into the matching compile<Variant>Kotlin task, the .kt files are
+        // compiled into this module's classes.jar, and downstream modules (:app)
+        // can resolve the `morselink_core` package. The srcDir is lazy, so the
+        // files only having to exist at execution time is fine.
+        android.sourceSets.getByName(variant.name).java.srcDir(
+            layout.buildDirectory.dir("generated/uniffi/${variant.name}"))
+
+        // Make this variant's Kotlin compile depend on the generating task so
+        // the sources exist when the compiler snapshots its inputs.
+        tasks.matching { it.name == "compile${variant.name.capitalize()}Kotlin" }
+             .configureEach { dependsOn(buildRust) }
 
         buildRustTasks += buildRust
     }
