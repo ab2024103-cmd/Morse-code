@@ -1,0 +1,11 @@
+# UniFFI configuration for the MorseLink core.
+#
+# This pins the generated Kotlin package to `morselink_core` (instead of the
+# default `uniffi.morselink_core`) so the Android wrapper (MorseLinkEngine.kt)
+# can `import morselink_core.*` directly. The cdylib name must match the Rust
+# `[lib] name` so the generated code calls `System.loadLibrary("morselink_core")`.
+
+[bindings.kotlin]
+package_name = "morselink_core"
+cdylib_name = "morselink_core"
+android = true

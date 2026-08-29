@@ -1,0 +1,20 @@
+# A tiny standalone UniFFI bindgen CLI.
+#
+# UniFFI 0.28 does not publish an installable `uniffi-bindgen` binary (the
+# `uniffi_bindgen` crate on crates.io is a library). Instead you build this
+# small binary which wraps `uniffi::uniffi_bindgen_main()`. It is pinned to the
+# exact same `uniffi` version as `../../rust-core` so the generated bindings
+# match the compiled library's metadata contract.
+
+[package]
+name = "morselink-uniffi-bindgen"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/main.rs"
+
+[dependencies]
+uniffi = { version = "=0.28.0", features = ["cli"] }

@@ -8,9 +8,13 @@ import morselink_core.TransferObserver
 
 /**
  * Thin wrapper around the UniFFI-generated [TransferEngine]. The Kotlin
- * bindings are emitted by `uniffi-bindgen` from the shared Rust core (see
- * :core-transfer/build.gradle), so this is the only place the app references
- * the generated class names. If bindgen renames anything, fix it here first.
+ * bindings are emitted by the in-repo `uniffi-bindgen` CLI from the shared Rust
+ * core (see :core-transfer/build.gradle) into package `morselink_core`
+ * (configured via `rust-core/uniffi.toml`), so this is the only place the app
+ * references the generated class names.
+ *
+ * Note the UniFFI Kotlin primitive mapping used here:
+ *   `u16` -> `UShort`, `u64` -> `ULong`, `f64` -> `Double`, `bool` -> `Boolean`.
  */
 class MorseLinkEngine(private val context: Context) {
 
@@ -26,12 +30,12 @@ class MorseLinkEngine(private val context: Context) {
         )
         val e = TransferEngine.new(config)
         e.setObserver(object : TransferObserver {
-            override fun onProgress(streamId: Long, bytesDone: Long, bytesTotal: Long) {
+            override fun onProgress(streamId: ULong, bytesDone: ULong, bytesTotal: ULong) {
                 // Progress can be dispatched here; the UI subscribes via a bus.
             }
             override fun onPeerDiscovered(peerId: String, peerName: String, addr: String) {
             }
-            override fun onTransferComplete(fileName: String, total: Long) {
+            override fun onTransferComplete(fileName: String, total: ULong) {
             }
         })
         try {

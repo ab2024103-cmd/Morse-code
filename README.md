@@ -62,11 +62,15 @@ toolchain.
 ```bash
 # On a machine with Rust + Android NDK/SDK + JDK17 + Gradle 8.7
 cargo install cargo-ndk
-cargo install uniffi_bindgen --version 0.28.0
 cd android
 gradle assembleDebug      # -> app/build/outputs/apk/debug/app-debug.apk
 gradle bundleRelease      # -> app/build/outputs/bundle/release/app-release.aab
 ```
+The `:core-transfer` Gradle task builds the shared Rust core (`cargo ndk`) and
+generates the UniFFI Kotlin bindings by compiling the in-repo
+`rust-core/bindgen` CLI (pinned to `uniffi 0.28.0`). UniFFI 0.28 ships no
+installable `uniffi-bindgen` binary, so it is built locally rather than
+`cargo install`-ed.
 Or just push to GitHub: `.github/workflows/android.yml` builds both and uploads
 the artifacts.
 

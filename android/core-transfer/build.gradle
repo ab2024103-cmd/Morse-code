@@ -25,7 +25,9 @@ dependencies {
 // ---------------------------------------------------------------------------
 // Rust core build (shared engine). Consumes the SAME crate the desktop app uses,
 // compiled to this device's ABIs and producing the UniFFI Kotlin bindings at
-// src/main/java/kotlin. Skippable on dev boxes by exporting MORSELINK_SKIP_NATIVE.
+// src/main/java/kotlin. The `uniffi-bindgen` CLI is built on the fly from the
+// in-repo rust-core/bindgen crate (pinned to uniffi = 0.28.0). Skippable on dev
+// boxes by exporting MORSELINK_SKIP_NATIVE=1.
 // ---------------------------------------------------------------------------
 def rustCoreDir = rootProject.file("../rust-core")
 def jniLibsDir = file("src/main/jniLibs")
@@ -41,13 +43,16 @@ def buildRust = tasks.register("buildRust", Exec) {
     def libsOut = jniLibsDir.absolutePath
     def kotlinOut = genKotlinDir.absolutePath
 
-    // "$" here are SHELL variables; they're escaped with a backslash so Groovy
-    // does not try to interpolate them.
+    // "$" here are SHELL variables; they are escaped with a backslash so Groovy
+    // does not interpolate them. The bindgen CLI is built from rust-core/bindgen.
     commandLine("bash", "-lc",
         "set -euo pipefail && " +
-        "cargo ndk $abiArgs -o $libsOut build --release --features ffi && " +
-        "SO=$(find $libsOut -name 'libmorselink_core.so' | head -n1) && " +
-        "uniffi-bindgen --library \"\$SO\" --language kotlin --out-dir $kotlinOut/morselink_core")
+        "cargo ndk $abiArgs -o \"$libsOut\" build --release --features ffi && " +
+        "SO=$(find \"$libsOut\" -name 'libmorselink_core.so' | head -n1) && " +
+        "TMP=$(mktemp -d) && " +
+        "cargo run --release --manifest-path bindgen/Cargo.toml -- " +
+        "generate --library \"$SO\" --language kotlin --out-dir \"$TMP\" && " +
+        "mkdir -p \"$kotlinOut\" && cp -r \"$TMP/.\" \"$kotlinOut/\" && rm -rf \"$TMP\"")
 }
 
 tasks.named("preBuild") {

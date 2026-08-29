@@ -11,7 +11,8 @@ cd "$(dirname "$0")/.."
 echo ">> Installing Rust Android targets (idempotent)"
 rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android || true
 cargo install cargo-ndk --locked || true
-cargo install uniffi_bindgen --version 0.28.0 --locked || true
+# The uniffi-bindgen CLI is built by the :core-transfer Gradle task from
+# rust-core/bindgen (pinned to uniffi 0.28.0), so nothing to install here.
 
 echo ">> Building native core + Android app"
 # If you don't have the NDK toolchain, run with MORSELINK_SKIP_NATIVE=1 to
