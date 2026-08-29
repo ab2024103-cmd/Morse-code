@@ -89,9 +89,22 @@ abstract class RustBindgenTask extends DefaultTask {
             // unlike `| head`), and works on both GNU and BSD find.
             "SO=\$(find \"$libsOut\" -name 'libmorselink_core.so' -type f | sort | awk 'NR==1{print}') && " +
             "TMP=\$(mktemp -d) && " +
+            // NOTE --config is REQUIRED: in --library mode uniffi-bindgen only
+            // auto-discovers a .toml sitting next to the .so (inside
+            // jniLibs/<abi>/). Without it, the Kotlin bindings silently fall
+            // back to the default package `uniffi.morselink_core` and every
+            // `import morselink_core.*` in the app fails to resolve.
             "cargo run --release --manifest-path bindgen/Cargo.toml -- " +
-            "generate --library \"\$SO\" --language kotlin --out-dir \"\$TMP\" && " +
-            "mkdir -p \"$kotlinOut\" && cp -r \"\$TMP/.\" \"$kotlinOut/\" && rm -rf \"\$TMP\""
+            "generate --library \"\$SO\" --config uniffi.toml --language kotlin --out-dir \"\$TMP\" && " +
+            "mkdir -p \"$kotlinOut\" && cp -r \"\$TMP/.\" \"$kotlinOut/\" && rm -rf \"\$TMP\" && " +
+            // Fail loudly (with the offending package line) if the bindings
+            // are missing or landed under the wrong package.
+            "KT=\$(find \"$kotlinOut\" -name '*.kt' -type f | sort | awk 'NR==1{print}') && " +
+            "test -n \"\$KT\" || { echo 'uniffi-bindgen produced no .kt files' >&2; exit 3; } && " +
+            "grep -q '^package morselink_core\$' \"\$KT\" || { " +
+            "echo 'bindings package mismatch; generated package line was:' >&2; " +
+            "grep -m2 '^package' \"\$KT\" >&2; exit 4; } && " +
+            "echo \"bindings ok: \$(find \"$kotlinOut\" -name '*.kt' | wc -l) .kt file(s), first=\$KT\""
 
         // Capture the FULL cargo/bindgen output to a file (the runner-side raw
         // log is not always reachable from tooling), and mirror the failure
