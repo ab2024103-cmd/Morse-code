@@ -19,6 +19,17 @@ android {
     sourceSets.main.java.srcDirs("src/main/java/kotlin")
 }
 
+// Create the generated-source directory at CONFIGURATION time, not just when
+// buildRust runs. AGP registers Kotlin source roots when the configuration is
+// evaluated; if this directory only appears at execution time (created by
+// buildRust's `mkdir -p`/`cp`), compile*Kotlin snapshots an empty source set and
+// reports NO-SOURCE, so the generated morselink_core bindings are never compiled
+// and the app cannot resolve them. Making the directory exist up front turns it
+// into a real source root; AGP re-walks registered source dirs at execution, so
+// the bindings copied in by buildRust (which compile*Kotlin depends on) are
+// picked up.
+file("src/main/java/kotlin").mkdirs()
+
 dependencies {
 }
 
