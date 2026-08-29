@@ -95,7 +95,10 @@ abstract class RustBindgenTask extends DefaultTask {
             // back to the default package `uniffi.morselink_core` and every
             // `import morselink_core.*` in the app fails to resolve.
             "cargo run --release --manifest-path bindgen/Cargo.toml -- " +
-            "generate --library \"\$SO\" --config uniffi.toml --language kotlin --out-dir \"\$TMP\" && " +
+            // NB: `cargo run` executes with CWD set to the *manifest's* package
+            // dir (rust-core/bindgen), so relative paths handed to the binary
+            // resolve there — pass the config as an ABSOLUTE path.
+            "generate --library \"\$SO\" --config \"${rustCoreDir.get()}/uniffi.toml\" --language kotlin --out-dir \"\$TMP\" && " +
             "mkdir -p \"$kotlinOut\" && cp -r \"\$TMP/.\" \"$kotlinOut/\" && rm -rf \"\$TMP\" && " +
             // Fail loudly (with the offending package line) if the bindings
             // are missing or landed under the wrong package.
@@ -129,7 +132,10 @@ abstract class RustBindgenTask extends DefaultTask {
             os.close()
         }
         if (exit != 0) {
-            def tail = logFile.readLines().reverse().take(80).reverse().join("\n")
+            // Keep the throw-message small: the *last* lines are the ones with
+            // the real error (cargo noise dominates the beginning). Gradle
+            // truncates very long exception messages in failure reports.
+            def tail = logFile.readLines().reverse().take(25).reverse().join("\n")
             def summary = System.getenv("GITHUB_STEP_SUMMARY")
             if (summary) {
                 new File(summary) << "\n## :factory: Rust core / UniFFI task failed (exit $exit)\n\n" +
