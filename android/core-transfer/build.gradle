@@ -48,11 +48,11 @@ def buildRust = tasks.register("buildRust", Exec) {
     commandLine("bash", "-lc",
         "set -euo pipefail && " +
         "cargo ndk $abiArgs -o \"$libsOut\" build --release --features ffi && " +
-        "SO=$(find \"$libsOut\" -name 'libmorselink_core.so' | head -n1) && " +
-        "TMP=$(mktemp -d) && " +
+        "SO=\$(find \"$libsOut\" -name 'libmorselink_core.so' | head -n1) && " +
+        "TMP=\$(mktemp -d) && " +
         "cargo run --release --manifest-path bindgen/Cargo.toml -- " +
-        "generate --library \"$SO\" --language kotlin --out-dir \"$TMP\" && " +
-        "mkdir -p \"$kotlinOut\" && cp -r \"$TMP/.\" \"$kotlinOut/\" && rm -rf \"$TMP\"")
+        "generate --library \"\$SO\" --language kotlin --out-dir \"\$TMP\" && " +
+        "mkdir -p \"$kotlinOut\" && cp -r \"\$TMP/.\" \"$kotlinOut/\" && rm -rf \"\$TMP\"")
 }
 
 tasks.named("preBuild") {
