@@ -1,0 +1,149 @@
+name: Build Android APK / AAB
+
+on:
+  push:
+    branches: [main, arena/**]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android platform / build-tools / NDK
+        run: |
+          yes | sdkmanager --licenses > /dev/null
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;26.3.11579264"
+
+      - name: Install Rust toolchain + Android targets
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android, armv7-linux-androideabi, x86_64-linux-android
+
+      - name: Install cargo-ndk
+        run: |
+          # The uniffi-bindgen CLI is built on the fly by the :core-transfer
+          # Gradle task from rust-core/bindgen (pinned to uniffi 0.28.0), so we
+          # only need cargo-ndk here.
+          cargo install cargo-ndk --locked
+
+      - name: Install Gradle (no wrapper jar committed)
+        run: |
+          curl -fsSL https://services.gradle.org/distributions/gradle-8.7-bin.zip -o /tmp/gradle.zip
+          unzip -q /tmp/gradle.zip -d /tmp
+          echo "/tmp/gradle-8.7/bin" >> "$GITHUB_PATH"
+
+      - name: Build debug APK + release AAB
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/26.3.11579264
+          ANDROID_NDK_ROOT: ${{ env.ANDROID_HOME }}/ndk/26.3.11579264
+        working-directory: android
+        run: |
+          set +e
+          gradle assembleDebug bundleRelease --no-daemon --stacktrace --info --console=plain \
+            > /tmp/gradle-build.log 2>&1
+          status=$?
+          tail -n 40 /tmp/gradle-build.log
+          exit $status
+
+      # The raw Actions log endpoint is not always reachable from every client,
+      # so mirror the failure-relevant slices of the gradle log into the job
+      # summary (readable via the Checks API / run page) and ship the full log
+      # as an artifact.
+      - name: Publish build diagnostics to job summary
+        if: always()
+        run: |
+          LOG=/tmp/gradle-build.log
+          {
+            if [ ! -s "$LOG" ]; then
+              echo "## Gradle log unavailable (step died before running gradle)"
+              exit 0
+            fi
+            echo "## Gradle: FAILED task lines"
+            echo '```text'
+            grep -E "> Task .*FAILED|FAILURE: Build|BUILD (SUCCESSFUL|FAILED)" "$LOG" | tail -n 40
+            echo '```'
+            echo "## What went wrong (each block, 30 lines of context)"
+            echo '```text'
+            grep -E -A 30 "What went wrong:" "$LOG" | head -c 14000
+            echo '```'
+            echo "## Rust/Kotlin compiler errors"
+            echo '```text'
+            grep -E -B1 -A10 "error\[E[0-9]{4}\]|^error: |^e: file://|error: unknown|Caused by:" "$LOG" \
+              | head -c 14000
+            echo '```'
+            echo "## Last 100 lines"
+            echo '```text'
+            tail -n 100 "$LOG" | head -c 8000
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload raw gradle build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-build-log
+          path: /tmp/gradle-build.log
+          if-no-files-found: warn
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: morselink-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+
+      - name: Upload release AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: morselink-release-aab
+          path: android/app/build/outputs/bundle/release/*.aab
+
+  # Publishes a GitHub Release carrying the APK (+ AAB) for tag pushes v*.
+  publish-release:
+    name: Release with APK
+    needs: build-android
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download debug APK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: morselink-debug-apk
+          path: dist
+
+      - name: Download release AAB artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: morselink-release-aab
+          path: dist
+
+      - name: Create / update GitHub Release with the APK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="$GITHUB_REF_NAME"
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release create "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "MorseLink $TAG" \
+              --notes "Android build from \`$GITHUB_SHA\` (CI: ${{ github.workflow }} run #${{ github.run_number }}).
+          - \`morselink-*.apk\` — debug APK, installable directly.
+          - \`morselink-*.aab\` — release AAB for Play upload / bundle tooling."
+          fi
+          gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" dist/* --clobber
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY"

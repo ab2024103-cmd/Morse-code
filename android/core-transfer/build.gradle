@@ -69,20 +69,67 @@ abstract class RustBindgenTask extends DefaultTask {
         // src/main/jniLibs when it merges native libraries.
         def libsOut = new File(project.projectDir, "src/main/jniLibs").absolutePath
         def kotlinOut = bindingsDir.get().asFile.absolutePath
+
+        // The workflow must pass ANDROID_NDK_HOME/ROOT; if the step-level env
+        // expression resolved to a bogus path (it evaluates against the *job*
+        // env), recover by deriving it from the SDK root the setup action
+        // exported. cargo-ndk fails fast otherwise.
+        def ndkExports = ""
+        def ndkHome = System.getenv("ANDROID_NDK_HOME")
+        if (!ndkHome || !new File(ndkHome).exists()) {
+            def sdk = System.getenv("ANDROID_HOME")
+            def cand = sdk ? new File(new File(sdk), "ndk/26.3.11579264") : null
+            if (cand?.exists()) {
+                ndkExports = "export ANDROID_NDK_HOME=\"${cand}\" ANDROID_NDK_ROOT=\"${cand}\" && "
+            }
+        }
+
         // `$` here are SHELL variables; escaped with a backslash so Groovy does
         // not interpolate them. The bindgen CLI is built from rust-core/bindgen.
         def cmd =
             "set -euo pipefail && " +
+            ndkExports +
             "cargo ndk $abiArgs -o \"$libsOut\" build --release --features ffi --lib && " +
-            "SO=\$(find \"$libsOut\" -name 'libmorselink_core.so' | head -n1) && " +
+            // sort|awk keeps every byte consumed (no SIGPIPE under pipefail,
+            // unlike `| head`), and works on both GNU and BSD find.
+            "SO=\$(find \"$libsOut\" -name 'libmorselink_core.so' -type f | sort | awk 'NR==1{print}') && " +
             "TMP=\$(mktemp -d) && " +
             "cargo run --release --manifest-path bindgen/Cargo.toml -- " +
             "generate --library \"\$SO\" --language kotlin --out-dir \"\$TMP\" && " +
             "mkdir -p \"$kotlinOut\" && cp -r \"\$TMP/.\" \"$kotlinOut/\" && rm -rf \"\$TMP\""
 
-        project.exec {
-            workingDir = file(rustCoreDir.get())
-            commandLine("bash", "-lc", cmd)
+        // Capture the FULL cargo/bindgen output to a file (the runner-side raw
+        // log is not always reachable from tooling), and mirror the failure
+        // tail into the Actions job summary before rethrowing.
+        def logFile = new File(project.buildDir, "logs/morselink-rust-exec.log")
+        logFile.parentFile.mkdirs()
+        logFile.text = ""
+        def os = new FileOutputStream(logFile)
+        int exit
+        try {
+            // NOTE: inside a task class there is no implicit `file()` (that is
+            // a Project method) — resolve through project.file(...).
+            def res = project.exec {
+                workingDir = project.file(rustCoreDir.get())
+                commandLine("bash", "-lc", cmd)
+                standardOutput = os
+                errorOutput = os
+                ignoreExitValue = true
+            }
+            exit = res.exitValue
+        } finally {
+            os.close()
+        }
+        if (exit != 0) {
+            def tail = logFile.readLines().reverse().take(80).reverse().join("\n")
+            def summary = System.getenv("GITHUB_STEP_SUMMARY")
+            if (summary) {
+                new File(summary) << "\n## :factory: Rust core / UniFFI task failed (exit $exit)\n\n" +
+                    "Full log: `core-transfer/build/logs/morselink-rust-exec.log`\n\n```\n" +
+                    tail.take(18000) + "\n```\n"
+            }
+            throw new GradleException(
+                "cargo ndk / uniffi-bindgen failed with exit $exit; tail of captured output:\n$tail")
         }
     }
 }

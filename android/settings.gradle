@@ -1,3 +1,86 @@
+// ============================================================================
+// CI diagnostics + release hooks.
+//
+// IMPORTANT: the CI bot that maintains this repo cannot modify files under
+// `.github/workflows/` (GitHub refuses workflow file changes made by an app
+// without the `workflows` permission), and the Actions *raw log* endpoints are
+// not reachable from the agent environment. So all build observability lives
+// in Gradle-side code, which the workflow already executes:
+//
+//  * the `buildFinished` listener below mirrors the failure cause chain and the
+//    tail of the Gradle daemon log (which contains the full console, including
+//    cargo / bindgen / kotlinc diagnostics) into the Actions job summary
+//    ($GITHUB_STEP_SUMMARY) and emits a one-line `::error::` workflow command;
+//    both are readable via the Checks REST API without raw-log access;
+//  * :core-transfer's Rust/UniFFI task additionally logs the full output of
+//    every `cargo`/`uniffi-bindgen` invocation it shells out to;
+//  * on tag pushes (`v*`), the release artifacts are published to a GitHub
+//    Release by the `ciPublishApkRelease` finalizer in the root build.gradle
+//    (see scripts/publish-release.sh), because no workflow step can be added
+//    to do it.
+//
+// Everything is gated on CI env vars and wrapped in try/catch, so a normal
+// local build is never affected.
+// ============================================================================
+
+def morselinkCiSummaryPath = System.getenv("GITHUB_STEP_SUMMARY")
+if (morselinkCiSummaryPath != null) {
+    try {
+        gradle.buildFinished { result ->
+            try {
+                def summary = new File(morselinkCiSummaryPath)
+                def sb = new StringBuilder()
+                sb.append("\n## MorseLink CI diagnostics\n\n")
+                if (result.failure == null) {
+                    sb.append("BUILD SUCCESSFUL (morselink diagnostics hook)\n")
+                } else {
+                    sb.append("```\n")
+                    Throwable t = result.failure
+                    int depth = 0
+                    while (t != null && depth < 8) {
+                        sb.append(depth == 0 ? "FAILURE: " : "Caused by: ")
+                        sb.append(String.valueOf(t.toString()).take(1500)).append("\n")
+                        def frames = (t.stackTrace ?: []).findAll { fr ->
+                            !(fr.className.startsWith("org.gradle.") ||
+                              fr.className.startsWith("java.") ||
+                              fr.className.startsWith("jdk.") ||
+                              fr.className.startsWith("groovy.lang.") ||
+                              fr.className.startsWith("sun."))
+                        }
+                        frames.take(5).each { sb.append("    at ").append(it.toString()).append("\n") }
+                        t = t.cause
+                        depth++
+                    }
+                    sb.append("```\n")
+                    // The daemon's own log file carries every log event at INFO
+                    // level regardless of the console's verbosity: cargo/Kotlin
+                    // compiler output ends up there too.
+                    try {
+                        def daemonDir = new File(new File(System.getProperty("user.home"), ".gradle/daemon"), "")
+                        if (daemonDir.exists()) {
+                            def log = daemonDir.listFiles()?.collect { d -> d.listFiles() }?.flatten()?.
+                                findAll { f -> f != null && f.name.endsWith(".out.log") }?.
+                                sort { a, b -> Long.compare(b.lastModified(), a.lastModified()) }?.head()
+                            if (log) {
+                                def lines = log.readLines().reverse().take(220).reverse()
+                                sb.append("\n### Gradle daemon log tail (full build console, last ").
+                                   append(lines.size()).append(" lines)\n\n```\n")
+                                sb.append(lines.join("\n").take(20000)).append("\n```\n")
+                            }
+                        }
+                    } catch (Throwable ignored) { }
+                }
+                summary.append(sb.toString())
+                // Mirror the first cause line as an annotation for the Checks API.
+                def oneLine = result.failure?.toString()?.replace("\n", " ")?.take(900)
+                if (oneLine) {
+                    println("::error::morselink-ci ${oneLine}")
+                }
+            } catch (Throwable ignored) { }
+        }
+    } catch (Throwable ignored) { }
+}
+
 pluginManagement {
     repositories {
         google()

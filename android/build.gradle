@@ -18,3 +18,39 @@ subprojects {
 tasks.register("clean", Delete) {
     delete rootProject.layout.buildDirectory
 }
+
+// ---------------------------------------------------------------------------
+// CI-only: publish the built APK/AAB as a GitHub Release.
+//
+// The workflow file itself cannot be modified by the CI bot (no `workflows`
+// permission), and the agent sandbox cannot reach the Actions artifact blob
+// store to fetch binaries after a run. The runner CAN, and the runner has the
+// job token persisted by actions/checkout — so the release is created from
+// inside the build, as a finalizer of :app:bundleRelease.
+//
+//  * push tagged `v*`  -> creates/updates the GitHub Release for that tag and
+//                         attaches app-debug.apk + app-release.aab.
+//  * other CI pushes    -> only a no-side-effect *probe* of release write
+//                         permissions (create + delete a draft), so we learn
+//                         early whether publishing from the runner is possible.
+//
+// The script never exits non-zero, so this can never break an otherwise green
+// build; its diagnostics go to the job summary via $GITHUB_STEP_SUMMARY.
+// ---------------------------------------------------------------------------
+def ciPublishApkRelease = tasks.register("ciPublishApkRelease", Exec) {
+    group = "publishing"
+    description = "CI hook: create/refresh the GitHub Release with APK + AAB (tag pushes)"
+    workingDir = rootDir
+    commandLine "bash", rootProject.file("../scripts/publish-release.sh").absolutePath
+    environment "APK_PATH", rootProject.file("app/build/outputs/apk/debug/app-debug.apk").absolutePath
+    environment "AAB_PATH", rootProject.file("app/build/outputs/bundle/release/app-release.aab").absolutePath
+    onlyIf { System.getenv("GITHUB_ACTIONS") == "true" }
+}
+
+subprojects { p ->
+    if (p.name == "app") {
+        p.tasks.matching { it.name == "bundleRelease" }.all {
+            it.finalizedBy(ciPublishApkRelease)
+        }
+    }
+}

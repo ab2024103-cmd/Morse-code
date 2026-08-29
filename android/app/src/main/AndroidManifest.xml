@@ -66,10 +66,5 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
-        <service
-            android:name=".transfer.TransferReceiverService"
-            android:exported="false"
-            android:foregroundServiceType="dataSync" />
-
     </application>
 </manifest>
