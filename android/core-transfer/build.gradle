@@ -100,7 +100,7 @@ abstract class RustBindgenTask extends DefaultTask {
             //    crate for the host and bindgen against that instead. The
             //    generated Kotlin is ABI-independent.
             "cargo build --release --features ffi --lib && " +
-            "HSO=\"$(ls target/release/libmorselink_core.so 2>/dev/null || find target/release/deps -name 'libmorselink_core.so' -type f | sort | awk 'END{print}')\" && " +
+            "HSO=\"\$(ls target/release/libmorselink_core.so 2>/dev/null || find target/release/deps -name 'libmorselink_core.so' -type f | sort | awk 'END{print}')\" && " +
             "test -n \"\$HSO\" && test -f \"\$HSO\" || { echo 'no host cdylib for metadata extraction' >&2; exit 5; } && " +
             // sort|awk keeps every byte consumed (no SIGPIPE under pipefail,
             // unlike `| head`), and works on both GNU and BSD find.
