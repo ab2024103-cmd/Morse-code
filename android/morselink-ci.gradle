@@ -153,46 +153,55 @@ def mlPushDiag = { String label, String content ->
 }
 
 def mlReport = { String label, String chain, String tail ->
-    def full = chain + "\n" + tail
+    // The console renders the "What went wrong" block right AFTER this hook
+    // fires; wait briefly, then re-read a fresh, bigger daemon-log tail so the
+    // actual AAPT/kotlinc/cargo message text is included.
+    def tail2 = tail
+    try {
+        Thread.sleep(6000)
+        tail2 = mlDaemonTail(320)
+    } catch (Throwable ignored) {
+    }
+    def full = chain + "\n" + tail2
     mlAppend("\n## Morselink hook: " + label + "\n\n```\n" + full + "```\n")
-    // Only ~10 annotations fit per run, so prioritize real compiler diagnostics
-    // (kotlinc "e: file://", javac/cargo "error:") over generic noise.
+    // ~10 annotations fit per run (multi-KB each): pack real compiler
+    // diagnostics densely.
     def errLines = []
-    tail.readLines().each { l ->
-        def s = l.trim()
+    tail2.readLines().each { raw ->
+        def s = raw.trim()
         if (s.length() > 0 && (s.contains("e: file:") || s.contains("error:") ||
-            s.contains("What went wrong") || (s.startsWith("> Task") && s.contains("FAILED")))) {
+            s.contains("ERROR:") || s.contains("AAPT") || s.contains("What went wrong") ||
+            s.contains("Caused by:") || (s.startsWith("> Task ") && s.contains("FAILED")))) {
             errLines.add(s)
         }
     }
     int n = 0
-    if (!errLines.isEmpty()) {
-        def cur = new StringBuilder()
-        def chunks = []
-        errLines.each { l ->
-            if (cur.length() + l.length() + 3 > 1300) {
-                chunks.add(cur.toString())
-                cur = new StringBuilder()
-            }
-            cur.append(l).append(" ; ")
-        }
-        if (cur.length() > 0) {
+    def cur = new StringBuilder()
+    def chunks = []
+    errLines.each { l ->
+        if (cur.length() + l.length() + 3 > 3200) {
             chunks.add(cur.toString())
+            cur = new StringBuilder()
         }
-        chunks.take(6).each { c ->
-            println("::error::morderr[" + label.take(16) + "][" + (n++) + "] " + c.toString().replace("::", "-"))
-        }
-    } else {
+        cur.append(l).append(" ; ")
+    }
+    if (cur.length() > 0) {
+        chunks.add(cur.toString())
+    }
+    if (chunks.isEmpty()) {
         def lines = full.readLines()
-        for (int i = 0; i < lines.size() && n < 5; i++) {
+        for (int i = 0; i < lines.size() && n < 6; i++) {
             def l = lines.get(i).trim()
             if (l.length() > 0) {
                 mlAnn("mordiag[" + (n++) + "][" + label.take(16) + "] " + l)
             }
         }
-    }
-    chain.readLines().findAll { it.trim().length() > 0 }.take(2).each { c ->
-        println("::error::mordchain[" + label.take(16) + "] " + c.trim().take(300).replace("::", "-"))
+    } else {
+        def shown = new HashSet()
+        def uniq = chunks.collect { c -> c.toString().replace("::", "-") }.findAll { shown.add(it) }
+        uniq.take(9 - n).each { c ->
+            println("::error::morderr[" + label.take(16) + "][" + (n++) + "] " + c.take(3400))
+        }
     }
     def pushNote = mlPushDiag(label, full)
     mlAppend("push note: " + pushNote + "\n")
