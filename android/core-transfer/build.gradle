@@ -16,7 +16,20 @@ android {
         }
     }
 
-    sourceSets.main.java.srcDirs("src/main/java/kotlin")
+    sourceSets {
+        main {
+            // Register the generated UniFFI Kotlin bindings directory in the
+            // KOTLIN source root, not only the java one. core-transfer has no
+            // committed *.kt files (unlike the feature modules, whose .kt live
+            // under the default src/main/java root and are picked up by
+            // recursion), so its Kotlin compile source set stays empty and
+            // compile*Kotlin reports NO-SOURCE even after buildRust populates
+            // the folder. Adding it to `kotlin.srcDir(...)` makes it a real
+            // Kotlin source root.
+            java.srcDirs("src/main/java/kotlin")
+            kotlin.srcDir("src/main/java/kotlin")
+        }
+    }
 }
 
 // Create the generated-source directory at CONFIGURATION time, not just when
