@@ -26,8 +26,10 @@ path = "src/bin/morselink.rs"
 # Endpoint::client/server (which are cfg-gated on these features) are available.
 quinn = { version = "0.11", features = ["runtime-tokio", "ring"] }
 # rustls must expose the permissive-display verifier API used on the ephemeral
-# discovery path (dangerous_configuration) and the `ring` provider.
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "dangerous_configuration"] }
+# discovery path (ClientConfig::builder().dangerous()) and the `ring` provider.
+# NOTE: there is no `dangerous_configuration` feature in rustls 0.23 (that was a
+# 0.20-era feature); `.dangerous()` is available by default.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rcgen = "0.13"
 # Async runtime
 tokio = { version = "1", features = ["full"] }

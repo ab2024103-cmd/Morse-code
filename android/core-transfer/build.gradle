@@ -28,6 +28,11 @@ dependencies {
 // src/main/java/kotlin. The `uniffi-bindgen` CLI is built on the fly from the
 // in-repo rust-core/bindgen crate (pinned to uniffi = 0.28.0). Skippable on dev
 // boxes by exporting MORSELINK_SKIP_NATIVE=1.
+//
+// We wire buildRust in LAZILY (tasks.configureEach) rather than calling
+// tasks.named("mergeDebugJniLibFolders"), because that task does not exist on a
+// `com.android.library` module in AGP 8.x — referencing it by name crashes the
+// build at configuration time.
 // ---------------------------------------------------------------------------
 def rustCoreDir = rootProject.file("../rust-core")
 def jniLibsDir = file("src/main/jniLibs")
@@ -38,6 +43,8 @@ def buildRust = tasks.register("buildRust", Exec) {
     description = "Compile the shared Rust core with cargo-ndk and generate UniFFI bindings"
     group = "build"
     workingDir = rustCoreDir
+
+    onlyIf { System.getenv("MORSELINK_SKIP_NATIVE") == null }
 
     def abiArgs = abis.collect { "-t $it" }.join(" ")
     def libsOut = jniLibsDir.absolutePath
@@ -55,12 +62,13 @@ def buildRust = tasks.register("buildRust", Exec) {
         "mkdir -p \"$kotlinOut\" && cp -r \"\$TMP/.\" \"$kotlinOut/\" && rm -rf \"\$TMP\"")
 }
 
-tasks.named("preBuild") {
-    dependsOn(buildRust)
-    onlyIf { System.getenv("MORSELINK_SKIP_NATIVE") == null }
-}
-
-tasks.named("mergeDebugJniLibFolders") {
-    dependsOn(buildRust)
-    onlyIf { System.getenv("MORSELINK_SKIP_NATIVE") == null }
+// Lazy wiring: ensure buildRust runs before any task that needs the .so in
+// src/main/jniLibs (preBuild and every JNI-lib merge/packaging task). Using
+// configureEach avoids the "task not found" crash from tasks.named(...).
+tasks.configureEach {
+    if (name == "preBuild" ||
+        (name.startsWith("merge") && name.contains("JniLibFolders")) ||
+        (name.startsWith("merge") && name.contains("NativeLibs"))) {
+        dependsOn(buildRust)
+    }
 }
