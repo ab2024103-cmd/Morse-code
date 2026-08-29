@@ -18,6 +18,13 @@ android {
 }
 
 dependencies {
+    // UniFFI's Kotlin bindings are JNA-based (com.sun.jna.* in every
+    // generated file), and consumers must see it too: :app instantiates
+    // TransferEngine, whose supertype FFIObject exposes a com.sun.jna.Pointer
+    // member — Kotlin requires supertypes on the consumer's compile
+    // classpath, hence `api` and not `implementation`. The @aar flavor ships
+    // libjnidispatch for Android devices.
+    api("net.java.dev.jna:jna:5.13.0@aar")
 }
 
 // ---------------------------------------------------------------------------
@@ -84,21 +91,29 @@ abstract class RustBindgenTask extends DefaultTask {
         def cmd =
             "set -euo pipefail && " +
             ndkExports +
+            // 1) Android ABIs -> the .so that ships in the APK (jniLibs).
             "cargo ndk $abiArgs -o \"$libsOut\" build --release --features ffi --lib && " +
+            // 2) UniFFI metadata extraction must dlopen the library, so it can
+            //    ONLY work against a HOST-arch build (an aarch64 .so dlopen'd
+            //    on the x86_64 runner fails with ENOENT/EFORMAT — this is why
+            //    pointing --library at the jniLibs .so breaks). Build the same
+            //    crate for the host and bindgen against that instead. The
+            //    generated Kotlin is ABI-independent.
+            "cargo build --release --features ffi --lib && " +
+            "HSO=\"$(ls target/release/libmorselink_core.so 2>/dev/null || find target/release/deps -name 'libmorselink_core.so' -type f | sort | awk 'END{print}')\" && " +
+            "test -n \"\$HSO\" && test -f \"\$HSO\" || { echo 'no host cdylib for metadata extraction' >&2; exit 5; } && " +
             // sort|awk keeps every byte consumed (no SIGPIPE under pipefail,
             // unlike `| head`), and works on both GNU and BSD find.
-            "SO=\$(find \"$libsOut\" -name 'libmorselink_core.so' -type f | sort | awk 'NR==1{print}') && " +
             "TMP=\$(mktemp -d) && " +
             // NOTE --config is REQUIRED: in --library mode uniffi-bindgen only
-            // auto-discovers a .toml sitting next to the .so (inside
-            // jniLibs/<abi>/). Without it, the Kotlin bindings silently fall
-            // back to the default package `uniffi.morselink_core` and every
-            // `import morselink_core.*` in the app fails to resolve.
+            // auto-discovers a .toml sitting next to the .so. Without it the
+            // Kotlin bindings silently fall back to the default package
+            // `uniffi.morselink_core` and every `import morselink_core.*` in
+            // the app fails to resolve. NB2: `cargo run` executes with CWD set
+            // to the *manifest's* package dir (rust-core/bindgen), so all
+            // paths handed to the binary must be absolute.
             "cargo run --release --manifest-path bindgen/Cargo.toml -- " +
-            // NB: `cargo run` executes with CWD set to the *manifest's* package
-            // dir (rust-core/bindgen), so relative paths handed to the binary
-            // resolve there — pass the config as an ABSOLUTE path.
-            "generate --library \"\$SO\" --config \"${rustCoreDir.get()}/uniffi.toml\" --language kotlin --out-dir \"\$TMP\" && " +
+            "generate --library \"\$HSO\" --config \"${rustCoreDir.get()}/uniffi.toml\" --language kotlin --out-dir \"\$TMP\" && " +
             "mkdir -p \"$kotlinOut\" && cp -r \"\$TMP/.\" \"$kotlinOut/\" && rm -rf \"\$TMP\" && " +
             // Fail loudly (with the offending package line) if the bindings
             // are missing or landed under the wrong package.
@@ -107,7 +122,7 @@ abstract class RustBindgenTask extends DefaultTask {
             "grep -q '^package morselink_core\$' \"\$KT\" || { " +
             "echo 'bindings package mismatch; generated package line was:' >&2; " +
             "grep -m2 '^package' \"\$KT\" >&2; exit 4; } && " +
-            "echo \"bindings ok: \$(find \"$kotlinOut\" -name '*.kt' | wc -l) .kt file(s), first=\$KT\""
+            "echo \"bindings ok: \$(find \"$kotlinOut\" -name '*.kt' | wc -l) .kt file(s), first=\$KT\"
 
         // Capture the FULL cargo/bindgen output to a file (the runner-side raw
         // log is not always reachable from tooling), and mirror the failure
