@@ -198,6 +198,11 @@ echo "bindings OK: $(find "${MORSELINK_KOTLINOUT}" -name '*.kt' | wc -l) .kt fil
                         }
                     }
                 }
+                // Write into the daemon's stdout stream (the daemon log file
+                // that the CI hook tails when relaying annotations), not just
+                // the step summary (which the API cannot read back).
+                System.out.println("MORSELINK-API classes: " + names.join(", "))
+                errBlock.each { b2 -> System.out.println("MORSELINK-API-ERR " + b2) }
                 def summary = System.getenv("GITHUB_STEP_SUMMARY")
                 if (summary) {
                     new File(summary) << "\n## Morselink hook: MORSELINK-API\n\n" +

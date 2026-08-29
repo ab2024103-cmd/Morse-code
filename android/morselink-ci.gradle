@@ -170,6 +170,7 @@ def mlReport = { String label, String chain, String tail ->
     tail2.readLines().each { raw ->
         def s = raw.trim()
         if (s.length() > 0 && (s.contains("e: file:") || s.contains("error:") || s.contains("MORSELINK-API") ||
+            s.contains("Morselink hook: build-fail") || s.contains("## ") ||
             s.contains("ERROR:") || s.contains("AAPT") || s.contains("What went wrong") ||
             s.contains("Caused by:") || (s.startsWith("> Task ") && s.contains("FAILED")))) {
             errLines.add(s)
