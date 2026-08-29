@@ -100,11 +100,15 @@ abstract class RustBindgenTask extends DefaultTask {
             //    crate for the host and bindgen against that instead. The
             //    generated Kotlin is ABI-independent.
             "cargo build --release --features ffi --lib && " +
-            "HSO=\"\$(ls target/release/libmorselink_core.so 2>/dev/null || find target/release/deps -name 'libmorselink_core.so' -type f | sort | awk 'END{print}')\" && " +
-            "test -n \"\$HSO\" && test -f \"\$HSO\" || { echo 'no host cdylib for metadata extraction' >&2; exit 5; } && " +
+            "test -f \"\$PWD/target/release/libmorselink_core.so\" || { echo 'no host cdylib for metadata extraction' >&2; exit 5; } && " +
             // sort|awk keeps every byte consumed (no SIGPIPE under pipefail,
             // unlike `| head`), and works on both GNU and BSD find.
             "TMP=\$(mktemp -d) && " +
+            // Build the bindgen CLI, then INVOKE ITS BINARY with absolute paths
+            // — via `cargo run` the child CWD is bindgen/'s package dir, so any
+            // relative path (the HSO we found under ../target, TMP) would be
+            // resolved against the wrong directory.
+            "cargo build --release --manifest-path bindgen/Cargo.toml && " +
             // NOTE --config is REQUIRED: in --library mode uniffi-bindgen only
             // auto-discovers a .toml sitting next to the .so. Without it the
             // Kotlin bindings silently fall back to the default package
@@ -112,8 +116,10 @@ abstract class RustBindgenTask extends DefaultTask {
             // the app fails to resolve. NB2: `cargo run` executes with CWD set
             // to the *manifest's* package dir (rust-core/bindgen), so all
             // paths handed to the binary must be absolute.
-            "cargo run --release --manifest-path bindgen/Cargo.toml -- " +
-            "generate --library \"\$HSO\" --config \"${rustCoreDir.get()}/uniffi.toml\" --language kotlin --out-dir \"\$TMP\" && " +
+            "\"\$PWD/bindgen/target/release/uniffi-bindgen\" generate " +
+            "--library \"\$PWD/target/release/libmorselink_core.so\" " +
+            "--config \"\$PWD/uniffi.toml\" --language kotlin --out-dir \"\$TMP\" && " +
+            "echo GEN-FILES: && find \"\$TMP\" -type f | sort && " +
             "mkdir -p \"$kotlinOut\" && cp -r \"\$TMP/.\" \"$kotlinOut/\" && rm -rf \"\$TMP\" && " +
             // Fail loudly (with the offending package line) if the bindings
             // are missing or landed under the wrong package.
