@@ -104,8 +104,11 @@ echo "== [1/6] cargo ndk: android ABIs -> jniLibs"
 cargo ndk $abiArgs -o "${MORSELINK_LIBSOUT}" build --release --features ffi --lib
 
 echo "== [2/6] host cdylib (carrier of the uniffi metadata)"
-cargo build --release --features ffi --lib
-HOSTLIB="${MORSELINK_RUSTCORE}/target/release/libmorselink_core.so"
+# DEBUG profile on purpose: [profile.release] lto="thin" has been observed to
+# drop/merge away the custom .uniffi metadata section that print-repr/generate
+# read statically from the cdylib. Dev profile = plain object sections.
+cargo build --features ffi --lib
+HOSTLIB="${MORSELINK_RUSTCORE}/target/debug/libmorselink_core.so"
 test -f "$HOSTLIB" || { echo "FATAL: no host cdylib at $HOSTLIB" >&2; exit 5; }
 
 echo "== [3/6] bindgen CLI"
@@ -120,7 +123,8 @@ if ! "$BIND" print-repr "$HOSTLIB" > /tmp/morselink-repr.txt 2>&1; then
   head -c 1200 /tmp/morselink-repr.txt >&2
   exit 7
 fi
-echo "repr lines: $(wc -l < /tmp/morselink-repr.txt)"
+echo "repr lines: $(wc -l < /tmp/morselink-repr.txt); head:"
+head -c 600 /tmp/morselink-repr.txt
 
 echo "== [5/6] generate kotlin bindings"
 TMP=$(mktemp -d)
@@ -128,11 +132,15 @@ TMP=$(mktemp -d)
 echo GEN-FILES:
 find "$TMP" -type f | sort
 mkdir -p "${MORSELINK_KOTLINOUT}"
-find "$TMP" -name '*.kt' -type f -exec cp {} "${MORSELINK_KOTLINOUT}/" ;
+find "$TMP" -name '*.kt' -type f -print0 | xargs -0 -r cp -t "${MORSELINK_KOTLINOUT}/"
 
 echo "== [6/6] bindings sanity"
 KT=$(find "${MORSELINK_KOTLINOUT}" -name '*.kt' -type f | sort | awk 'NR==1{print}')
-test -n "$KT" || { echo "FATAL: no .kt files copied" >&2; exit 3; }
+if test -z "$KT"; then
+  echo "FATAL: no .kt files copied; repr was:" >&2
+  head -c 600 /tmp/morselink-repr.txt >&2
+  exit 3
+fi
 grep -q "^package morselink_core$" "$KT" || { echo "FATAL: wrong package; head of $KT:" >&2; head -20 "$KT" >&2; exit 4; }
 echo "bindings OK: $(find "${MORSELINK_KOTLINOUT}" -name '*.kt' | wc -l) .kt file(s), first=$KT"
 '''
