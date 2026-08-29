@@ -63,87 +63,89 @@ abstract class RustBindgenTask extends DefaultTask {
 
     @TaskAction
     void generate() {
-        def abiArgs = abis.get().collect { "-t $it" }.join(" ")
-        // Destination of the compiled libmorselink_core.so. This is shared by
-        // every variant and is deliberately NOT an @OutputDirectory on the task
-        // (both buildRustDebug and buildRustRelease write here, and Gradle flags
-        // the same output dir declared by two tasks). AGP picks the .so up from
-        // src/main/jniLibs when it merges native libraries.
+        // Values are handed to the shell script THROUGH THE ENVIRONMENT, and
+        // the script body is a Groovy triple-quoted SINGLE string (no Groovy
+        // interpolation, no \$ escape games). Earlier double-quoted variants
+        // produced subtly wrong shell quoting, which made uniffi-bindgen
+        // "silently" write its output into a bogus directory.
+        def rustCore = new File(rustCoreDir.get()).absolutePath
         def libsOut = new File(project.projectDir, "src/main/jniLibs").absolutePath
         def kotlinOut = bindingsDir.get().asFile.absolutePath
 
-        // The workflow must pass ANDROID_NDK_HOME/ROOT; if the step-level env
-        // expression resolved to a bogus path (it evaluates against the *job*
-        // env), recover by deriving it from the SDK root the setup action
-        // exported. cargo-ndk fails fast otherwise.
-        def ndkExports = ""
+        def env = [:] as Map<String, String>
         def ndkHome = System.getenv("ANDROID_NDK_HOME")
         if (!ndkHome || !new File(ndkHome).exists()) {
             def sdk = System.getenv("ANDROID_HOME")
             def cand = sdk ? new File(new File(sdk), "ndk/26.3.11579264") : null
             if (cand?.exists()) {
-                ndkExports = "export ANDROID_NDK_HOME=\"${cand}\" ANDROID_NDK_ROOT=\"${cand}\" && "
+                ndkHome = cand.absolutePath
             }
         }
+        if (ndkHome) {
+            env["ANDROID_NDK_HOME"] = ndkHome
+            env["ANDROID_NDK_ROOT"] = ndkHome
+        }
+        env["MORSELINK_RUSTCORE"] = rustCore
+        env["MORSELINK_LIBSOUT"] = libsOut
+        env["MORSELINK_KOTLINOUT"] = kotlinOut
+        env["MORSELINK_ABIS"] = abis.get().join(",")
 
-        // `$` here are SHELL variables; escaped with a backslash so Groovy does
-        // not interpolate them. The bindgen CLI is built from rust-core/bindgen.
-        def cmd =
-            "set -euo pipefail && " +
-            ndkExports +
-            // 1) Android ABIs -> the .so that ships in the APK (jniLibs).
-            "cargo ndk $abiArgs -o \"$libsOut\" build --release --features ffi --lib && " +
-            // 2) UniFFI metadata extraction must dlopen the library, so it can
-            //    ONLY work against a HOST-arch build (an aarch64 .so dlopen'd
-            //    on the x86_64 runner fails with ENOENT/EFORMAT — this is why
-            //    pointing --library at the jniLibs .so breaks). Build the same
-            //    crate for the host and bindgen against that instead. The
-            //    generated Kotlin is ABI-independent.
-            "cargo build --release --features ffi --lib && " +
-            "test -f \"\$PWD/target/release/libmorselink_core.so\" || { echo 'no host cdylib for metadata extraction' >&2; exit 5; } && " +
-            // sort|awk keeps every byte consumed (no SIGPIPE under pipefail,
-            // unlike `| head`), and works on both GNU and BSD find.
-            "TMP=\$(mktemp -d) && " +
-            // Build the bindgen CLI, then INVOKE ITS BINARY with absolute paths
-            // — via `cargo run` the child CWD is bindgen/'s package dir, so any
-            // relative path (the HSO we found under ../target, TMP) would be
-            // resolved against the wrong directory.
-            "cargo build --release --manifest-path bindgen/Cargo.toml && " +
-            // NOTE --config is REQUIRED: in --library mode uniffi-bindgen only
-            // auto-discovers a .toml sitting next to the .so. Without it the
-            // Kotlin bindings silently fall back to the default package
-            // `uniffi.morselink_core` and every `import morselink_core.*` in
-            // the app fails to resolve. NB2: `cargo run` executes with CWD set
-            // to the *manifest's* package dir (rust-core/bindgen), so all
-            // paths handed to the binary must be absolute.
-            "\"\$PWD/bindgen/target/release/uniffi-bindgen\" generate " +
-            "--library \"\$PWD/target/release/libmorselink_core.so\" " +
-            "--config \"\$PWD/uniffi.toml\" --language kotlin --out-dir \"\$TMP\" && " +
-            "echo GEN-FILES: && find \"\$TMP\" -type f | sort && " +
-            "mkdir -p \"$kotlinOut\" && cp -r \"\$TMP/.\" \"$kotlinOut/\" && rm -rf \"\$TMP\" && " +
-            // Fail loudly (with the offending package line) if the bindings
-            // are missing or landed under the wrong package.
-            "KT=\$(find \"$kotlinOut\" -name '*.kt' -type f | sort | awk 'NR==1{print}') && " +
-            "test -n \"\$KT\" || { echo 'uniffi-bindgen produced no .kt files' >&2; exit 3; } && " +
-            "grep -q '^package morselink_core\$' \"\$KT\" || { " +
-            "echo 'bindings package mismatch; generated package line was:' >&2; " +
-            "grep -m2 '^package' \"\$KT\" >&2; exit 4; } && " +
-            "echo \"bindings ok: \$(find \"$kotlinOut\" -name '*.kt' | wc -l) .kt file(s), first=\$KT\""
+        def scriptFile = new File(project.buildDir, "logs/morselink-rust-build.sh")
+        scriptFile.parentFile.mkdirs()
+        scriptFile.text = '''#!/usr/bin/env bash
+# Generated by :core-transfer buildRust (see core-transfer/build.gradle).
+set -euo pipefail
+echo "MORSELINK-RUST-SCRIPT-BEGIN (cwd: $(pwd))"
+abiArgs=""
+IFS=',' read -ra A <<< "${MORSELINK_ABIS}"
+for a in "${A[@]}"; do abiArgs="$abiArgs -t $a"; done
 
-        // Capture the FULL cargo/bindgen output to a file (the runner-side raw
-        // log is not always reachable from tooling), and mirror the failure
-        // tail into the Actions job summary before rethrowing.
+echo "== [1/6] cargo ndk: android ABIs -> jniLibs"
+cargo ndk $abiArgs -o "${MORSELINK_LIBSOUT}" build --release --features ffi --lib
+
+echo "== [2/6] host cdylib (carrier of the uniffi metadata)"
+cargo build --release --features ffi --lib
+HOSTLIB="${MORSELINK_RUSTCORE}/target/release/libmorselink_core.so"
+test -f "$HOSTLIB" || { echo "FATAL: no host cdylib at $HOSTLIB" >&2; exit 5; }
+
+echo "== [3/6] bindgen CLI"
+cargo build --release --manifest-path "${MORSELINK_RUSTCORE}/bindgen/Cargo.toml"
+BIND="${MORSELINK_RUSTCORE}/bindgen/target/release/uniffi-bindgen"
+test -x "$BIND" || BIND="${MORSELINK_RUSTCORE}/target/release/uniffi-bindgen"
+test -x "$BIND" || { echo "FATAL: uniffi-bindgen binary not found" >&2; exit 6; }
+
+echo "== [4/6] print-repr metadata probe"
+if ! "$BIND" print-repr "$HOSTLIB" > /tmp/morselink-repr.txt 2>&1; then
+  echo "FATAL: print-repr failed - the host cdylib carries no uniffi metadata:" >&2
+  head -c 1200 /tmp/morselink-repr.txt >&2
+  exit 7
+fi
+echo "repr lines: $(wc -l < /tmp/morselink-repr.txt)"
+
+echo "== [5/6] generate kotlin bindings"
+TMP=$(mktemp -d)
+"$BIND" generate --library "$HOSTLIB" --config "${MORSELINK_RUSTCORE}/uniffi.toml" --language kotlin --out-dir "$TMP" --no-format
+echo GEN-FILES:
+find "$TMP" -type f | sort
+mkdir -p "${MORSELINK_KOTLINOUT}"
+find "$TMP" -name '*.kt' -type f -exec cp {} "${MORSELINK_KOTLINOUT}/" ;
+
+echo "== [6/6] bindings sanity"
+KT=$(find "${MORSELINK_KOTLINOUT}" -name '*.kt' -type f | sort | awk 'NR==1{print}')
+test -n "$KT" || { echo "FATAL: no .kt files copied" >&2; exit 3; }
+grep -q "^package morselink_core$" "$KT" || { echo "FATAL: wrong package; head of $KT:" >&2; head -20 "$KT" >&2; exit 4; }
+echo "bindings OK: $(find "${MORSELINK_KOTLINOUT}" -name '*.kt' | wc -l) .kt file(s), first=$KT"
+'''
+
         def logFile = new File(project.buildDir, "logs/morselink-rust-exec.log")
-        logFile.parentFile.mkdirs()
         logFile.text = ""
         def os = new FileOutputStream(logFile)
         int exit
         try {
-            // NOTE: inside a task class there is no implicit `file()` (that is
-            // a Project method) — resolve through project.file(...).
             def res = project.exec {
                 workingDir = project.file(rustCoreDir.get())
-                commandLine("bash", "-lc", cmd)
+                commandLine("bash", scriptFile.absolutePath)
+                environment env
                 standardOutput = os
                 errorOutput = os
                 ignoreExitValue = true
@@ -156,15 +158,15 @@ abstract class RustBindgenTask extends DefaultTask {
             // Keep the throw-message small: the *last* lines are the ones with
             // the real error (cargo noise dominates the beginning). Gradle
             // truncates very long exception messages in failure reports.
-            def tail = logFile.readLines().reverse().take(25).reverse().join("\n")
+            def tail = logFile.readLines().reverse().take(30).reverse().join("\\n")
             def summary = System.getenv("GITHUB_STEP_SUMMARY")
             if (summary) {
-                new File(summary) << "\n## :factory: Rust core / UniFFI task failed (exit $exit)\n\n" +
-                    "Full log: `core-transfer/build/logs/morselink-rust-exec.log`\n\n```\n" +
-                    tail.take(18000) + "\n```\n"
+                new File(summary) << "\\n## :factory: Rust core / UniFFI task failed (exit $exit)\\n\\n" +
+                    "Full log: `core-transfer/build/logs/morselink-rust-exec.log`\\n\\n```\\n" +
+                    tail.take(18000) + "\\n```\\n"
             }
             throw new GradleException(
-                "cargo ndk / uniffi-bindgen failed with exit $exit; tail of captured output:\n$tail")
+                "cargo ndk / uniffi-bindgen failed with exit $exit; tail of captured output:\\n$tail")
         }
     }
 }
