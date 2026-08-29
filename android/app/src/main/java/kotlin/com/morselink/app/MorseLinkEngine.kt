@@ -28,7 +28,15 @@ class MorseLinkEngine(private val context: Context) {
             deviceName = android.os.Build.MODEL ?: "MorseLink device",
             enableDiscovery = true
         )
-        val e = TransferEngine.new(config)
+        // UniFFI 0.28 maps the Rust `#[uniffi::constructor] fn new(...)` to the
+        // object's primary Kotlin constructor, so instantiate directly (not via a
+        // `.new(...)` companion). The constructor throws `EngineError` (a sealed
+        // Exception subclass) on failure.
+        val e = try {
+            TransferEngine(config)
+        } catch (err: EngineError) {
+            throw IllegalStateException("Could not create transfer engine: ${err.message}", err)
+        }
         e.setObserver(object : TransferObserver {
             override fun onProgress(streamId: ULong, bytesDone: ULong, bytesTotal: ULong) {
                 // Progress can be dispatched here; the UI subscribes via a bus.
