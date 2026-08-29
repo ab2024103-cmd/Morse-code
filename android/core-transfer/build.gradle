@@ -67,7 +67,7 @@ abstract class RustBindgenTask extends DefaultTask {
         // (both buildRustDebug and buildRustRelease write here, and Gradle flags
         // the same output dir declared by two tasks). AGP picks the .so up from
         // src/main/jniLibs when it merges native libraries.
-        def libsOut = project.layout.projectDirectory.dir("src/main/jniLibs").asFile.absolutePath
+        def libsOut = new File(project.projectDir, "src/main/jniLibs").absolutePath
         def kotlinOut = bindingsDir.get().asFile.absolutePath
         // `$` here are SHELL variables; escaped with a backslash so Groovy does
         // not interpolate them. The bindgen CLI is built from rust-core/bindgen.
@@ -95,7 +95,7 @@ def abis = ["armeabi-v7a", "arm64-v8a", "x86_64"]
 def buildRustTasks = []
 
 androidComponents {
-    onVariants { variant ->
+    onVariants(selector().all()) { variant ->
         def taskName = "buildRust${variant.name.capitalize()}"
         def buildRust = tasks.register(taskName, RustBindgenTask) {
             description = "Compile the shared Rust core with cargo-ndk and generate UniFFI bindings"
