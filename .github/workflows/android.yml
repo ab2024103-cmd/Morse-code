@@ -32,10 +32,12 @@ jobs:
         with:
           targets: aarch64-linux-android, armv7-linux-androideabi, x86_64-linux-android
 
-      - name: Install cargo-ndk and uniffi-bindgen
+      - name: Install cargo-ndk
         run: |
+          # The uniffi-bindgen CLI is built on the fly by the :core-transfer
+          # Gradle task from rust-core/bindgen (pinned to uniffi 0.28.0), so we
+          # only need cargo-ndk here.
           cargo install cargo-ndk --locked
-          cargo install uniffi_bindgen --version 0.28.0 --locked
 
       - name: Install Gradle (no wrapper jar committed)
         run: |
