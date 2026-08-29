@@ -7,78 +7,155 @@
 // not reachable from the agent environment. So all build observability lives
 // in Gradle-side code, which the workflow already executes:
 //
-//  * the `buildFinished` listener below mirrors the failure cause chain and the
-//    tail of the Gradle daemon log (which contains the full console, including
-//    cargo / bindgen / kotlinc diagnostics) into the Actions job summary
-//    ($GITHUB_STEP_SUMMARY) and emits a one-line `::error::` workflow command;
-//    both are readable via the Checks REST API without raw-log access;
-//  * :core-transfer's Rust/UniFFI task additionally logs the full output of
-//    every `cargo`/`uniffi-bindgen` invocation it shells out to;
-//  * on tag pushes (`v*`), the release artifacts are published to a GitHub
-//    Release by the `ciPublishApkRelease` finalizer in the root build.gradle
-//    (see scripts/publish-release.sh), because no workflow step can be added
-//    to do it.
+//  * hooks below mirror any configuration/execution failure into the Actions
+//    job summary ($GITHUB_STEP_SUMMARY; readable via the Checks REST API and
+//    the run page) and emit `::error::` workflow commands (readable via the
+//    annotations API) — including the tail of the Gradle daemon log, which
+//    contains the full console (cargo, uniffi-bindgen, kotlinc);
+//  * :core-transfer's Rust/UniFFI task additionally logs every cargo/bindgen
+//    invocation to a file and appends failure excerpts itself;
+//  * on tag pushes (`v*`), the artifacts are published to a GitHub Release by
+//    the `ciPublishApkRelease` finalizer in the root build.gradle
+//    (scripts/publish-release.sh) using the runner's checkout credentials.
 //
-// Everything is gated on CI env vars and wrapped in try/catch, so a normal
-// local build is never affected.
+// Everything is gated on CI env vars and wrapped in try/catch so local builds
+// and CI runs are never broken by the hooks themselves. Syntax is kept
+// deliberately plain (this file compiling is load-bearing!).
 // ============================================================================
 
-def morselinkCiSummaryPath = System.getenv("GITHUB_STEP_SUMMARY")
-if (morselinkCiSummaryPath != null) {
+def morselinkSummary = System.getenv("GITHUB_STEP_SUMMARY")
+if (morselinkSummary != null && morselinkSummary.length() > 0) {
+
+    def morselinkAppend = { String text ->
+        try {
+            def file = new File(System.getenv("GITHUB_STEP_SUMMARY"))
+            file.append(text)
+        } catch (Throwable ignored) {
+        }
+    }
+
+    def morselinkChain = { Throwable fail ->
+        def out = new StringBuilder()
+        def t = fail
+        for (int i = 0; i < 8 && t != null; i++) {
+            String msg = String.valueOf(t.toString())
+            if (msg.length() > 1400) {
+                msg = msg.substring(0, 1400) + " ...[cut]"
+            }
+            out.append(i == 0 ? "FAILURE: " : "Caused by: ").append(msg).append("\n")
+            try {
+                def frames = t.getStackTrace()
+                int shown = 0
+                for (int j = 0; j < frames.length && shown < 4; j++) {
+                    String cn = frames[j].getClassName()
+                    if (!cn.startsWith("org.gradle.") && !cn.startsWith("java.") &&
+                        !cn.startsWith("jdk.") && !cn.startsWith("groovy.") &&
+                        !cn.startsWith("sun.") && !cn.startsWith("com.sun.")) {
+                        out.append("    at ").append(frames[j].toString()).append("\n")
+                        shown++
+                    }
+                }
+            } catch (Throwable ignored) {
+            }
+            t = t.getCause()
+        }
+        return out.toString()
+    }
+
+    def morselinkDaemonTail = { int maxLines ->
+        def out = new StringBuilder()
+        try {
+            def base = new File(new File(System.getProperty("user.home"), ".gradle"), "daemon")
+            def newest = null
+            def subs = base.listFiles()
+            if (subs != null) {
+                for (def sub : subs) {
+                    def logs = sub.listFiles()
+                    if (logs == null) {
+                        continue
+                    }
+                    for (def lf : logs) {
+                        if (lf.getName().endsWith(".out.log")) {
+                            if (newest == null || lf.lastModified() > newest.lastModified()) {
+                                newest = lf
+                            }
+                        }
+                    }
+                }
+            }
+            if (newest != null) {
+                def lines = newest.readLines()
+                int start = lines.size() - maxLines
+                if (start < 0) {
+                    start = 0
+                }
+                out.append("--- daemon log ").append(newest.getName()).append(" tail ---\n")
+                for (int i = start; i < lines.size(); i++) {
+                    out.append(lines.get(i)).append("\n")
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return out.toString()
+    }
+
+    def morselinkOneLine = { String msg ->
+        def s = msg.replace("\r", " ").replace("\n", " ")
+        if (s.length() > 900) {
+            s = s.substring(0, 900)
+        }
+        return s
+    }
+
+    try {
+        morselinkAppend("morselink CI hook v2: settings evaluated OK\n")
+        println("::notice::morselink-ci-hook v2 alive")
+    } catch (Throwable hookError) {
+        println("::error::morselink-ci hook v2 marker failed: " + morselinkOneLine(String.valueOf(hookError.toString())))
+    }
+
+    // Configuration-phase failures (the common failure mode for the
+    // AGP-variant-API wiring in :core-transfer):
+    try {
+        gradle.afterProject { project, state ->
+            try {
+                def fail = state.getFailure()
+                if (fail != null) {
+                    morselinkAppend("\n## Morselink hook: configuration failure in " + project.getPath() + "\n\n```\n")
+                    morselinkAppend(morselinkChain(fail))
+                    morselinkAppend(morselinkDaemonTail(120))
+                    morselinkAppend("```\n")
+                    println("::error::morselink-ci config-fail in " + project.getPath() + ": " + morselinkOneLine(String.valueOf(fail.toString())))
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+    } catch (Throwable hookError) {
+        morselinkAppend("morselink hook: afterProject registration FAILED: " + String.valueOf(hookError) + "\n")
+        println("::error::morselink-ci afterProject registration failed: " + morselinkOneLine(String.valueOf(hookError.toString())))
+    }
+
+    // Whole-build failures (execution phase: cargo, kotlinc, ...):
     try {
         gradle.buildFinished { result ->
             try {
-                def summary = new File(morselinkCiSummaryPath)
-                def sb = new StringBuilder()
-                sb.append("\n## MorseLink CI diagnostics\n\n")
-                if (result.failure == null) {
-                    sb.append("BUILD SUCCESSFUL (morselink diagnostics hook)\n")
+                def fail = result.getFailure()
+                if (fail == null) {
+                    morselinkAppend("morselink hook: buildFinished OK\n")
                 } else {
-                    sb.append("```\n")
-                    Throwable t = result.failure
-                    int depth = 0
-                    while (t != null && depth < 8) {
-                        sb.append(depth == 0 ? "FAILURE: " : "Caused by: ")
-                        sb.append(String.valueOf(t.toString()).take(1500)).append("\n")
-                        def frames = (t.stackTrace ?: []).findAll { fr ->
-                            !(fr.className.startsWith("org.gradle.") ||
-                              fr.className.startsWith("java.") ||
-                              fr.className.startsWith("jdk.") ||
-                              fr.className.startsWith("groovy.lang.") ||
-                              fr.className.startsWith("sun."))
-                        }
-                        frames.take(5).each { sb.append("    at ").append(it.toString()).append("\n") }
-                        t = t.cause
-                        depth++
-                    }
-                    sb.append("```\n")
-                    // The daemon's own log file carries every log event at INFO
-                    // level regardless of the console's verbosity: cargo/Kotlin
-                    // compiler output ends up there too.
-                    try {
-                        def daemonDir = new File(new File(System.getProperty("user.home"), ".gradle/daemon"), "")
-                        if (daemonDir.exists()) {
-                            def log = daemonDir.listFiles()?.collect { d -> d.listFiles() }?.flatten()?.
-                                findAll { f -> f != null && f.name.endsWith(".out.log") }?.
-                                sort { a, b -> Long.compare(b.lastModified(), a.lastModified()) }?.head()
-                            if (log) {
-                                def lines = log.readLines().reverse().take(220).reverse()
-                                sb.append("\n### Gradle daemon log tail (full build console, last ").
-                                   append(lines.size()).append(" lines)\n\n```\n")
-                                sb.append(lines.join("\n").take(20000)).append("\n```\n")
-                            }
-                        }
-                    } catch (Throwable ignored) { }
+                    morselinkAppend("\n## Morselink hook: build failed\n\n```\n")
+                    morselinkAppend(morselinkChain(fail))
+                    morselinkAppend(morselinkDaemonTail(220))
+                    morselinkAppend("```\n")
+                    println("::error::morselink-ci build-fail: " + morselinkOneLine(String.valueOf(fail.toString())))
                 }
-                summary.append(sb.toString())
-                // Mirror the first cause line as an annotation for the Checks API.
-                def oneLine = result.failure?.toString()?.replace("\n", " ")?.take(900)
-                if (oneLine) {
-                    println("::error::morselink-ci ${oneLine}")
-                }
-            } catch (Throwable ignored) { }
+            } catch (Throwable ignored) {
+            }
         }
-    } catch (Throwable ignored) { }
+    } catch (Throwable hookError) {
+        morselinkAppend("morselink hook: buildFinished registration FAILED: " + String.valueOf(hookError) + "\n")
+        println("::error::morselink-ci buildFinished registration failed: " + morselinkOneLine(String.valueOf(hookError.toString())))
+    }
 }
 
 pluginManagement {
