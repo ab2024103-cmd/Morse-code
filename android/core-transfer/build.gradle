@@ -173,14 +173,15 @@ echo "bindings OK: $(find "${MORSELINK_KOTLINOUT}" -name '*.kt' | wc -l) .kt fil
             os.close()
         }
         if (exit == 0) {
-            // Echo the real shape of the generated API surface to the gradle
-            // console: the CI hook relays marked lines as annotations, which is
-            // our only runner->sandbox channel. Settles name-mismatch questions
-            // (e.g. how the uniffi::Error enum surfaces in Kotlin) in one run.
+            // Persist a compact manifest of the generated surface. The CI hook
+            // relays the job-summary file through error annotations (its only
+            // reliable runner->sandbox channel), so settle name questions here.
             try {
                 def names = []
+                def errBlock = []
                 new File(kotlinOut).eachFileRecurse { f ->
                     if (f.name.endsWith(".kt")) {
+                        boolean inErr = false
                         f.eachLine { l ->
                             def m = (l =~ /^(?:public |internal |open |sealed |data |value )*class (\w+)|^(?:public )?interface (\w+)/)
                             if (m.find()) {
@@ -189,17 +190,26 @@ echo "bindings OK: $(find "${MORSELINK_KOTLINOUT}" -name '*.kt' | wc -l) .kt fil
                                     names.add(nm)
                                 }
                             }
+                            if (l.contains("EngineError")) {
+                                if (errBlock.size() < 12 && l.trim().length() > 0) {
+                                    errBlock.add(l.trim().take(150))
+                                }
+                            }
                         }
                     }
                 }
-                def line = "MORSELINK-API classes: " + names.join(", ")
-                println(line)
                 def summary = System.getenv("GITHUB_STEP_SUMMARY")
                 if (summary) {
-                    new File(summary) << "\n" + line + "\n"
+                    new File(summary) << "\n## Morselink hook: MORSELINK-API\n\n" +
+                        "classes: " + names.join(", ") + "\n" +
+                        "EngineError mentions (first " + errBlock.size() + "):\n```\n" +
+                        errBlock.join("\n").take(4000) + "\n```\n"
                 }
             } catch (Throwable t) {
-                println("MORSELINK-API scan failed: " + t)
+                def summary = System.getenv("GITHUB_STEP_SUMMARY")
+                if (summary) {
+                    new File(summary) << "\n## Morselink hook: MORSELINK-API scan failed: " + t + "\n"
+                }
             }
         }
         if (exit != 0) {
