@@ -30,6 +30,11 @@ dependencies {
     // classpath, hence `api` and not `implementation`. The @aar flavor ships
     // libjnidispatch for Android devices.
     api("net.java.dev.jna:jna:5.13.0@aar")
+    // The generated UniFFI file is annotated with @androidx.annotation.RequiresApi
+    // (System.loadLibrary gating). It's not pulled in transitively by the JNA
+    // @aar (non-transitive notation), so declare it — `api` because the
+    // annotation is on the public API surface that :app compiles against.
+    api("androidx.annotation:annotation:1.8.2")
 }
 
 // ---------------------------------------------------------------------------
