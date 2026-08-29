@@ -25,7 +25,9 @@ path = "src/bin/morselink.rs"
 # We explicitly enable the tokio runtime + ring crypto provider so that
 # Endpoint::client/server (which are cfg-gated on these features) are available.
 quinn = { version = "0.11", features = ["runtime-tokio", "ring"] }
-rustls = { version = "0.23", default-features = false, features = ["ring"] }
+# rustls must expose the permissive-display verifier API used on the ephemeral
+# discovery path (dangerous_configuration) and the `ring` provider.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "dangerous_configuration"] }
 rcgen = "0.13"
 # Async runtime
 tokio = { version = "1", features = ["full"] }

@@ -64,5 +64,11 @@ impl From<quinn::ReadError> for EngineError {
     }
 }
 
+impl From<quinn::FinishError> for EngineError {
+    fn from(e: quinn::FinishError) -> Self {
+        Self::Transport(format!("finish: {e}"))
+    }
+}
+
 /// Public result alias.
 pub type Result<T> = std::result::Result<T, EngineError>;

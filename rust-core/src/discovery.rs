@@ -128,6 +128,9 @@ async fn run_loop_inner(
     let mut interval = tokio::time::interval(config.announce_interval);
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
+    // Reusable receive buffer (bound to the loop so the read bytes are kept).
+    let mut buf = [0u8; 2048];
+
     loop {
         // Announce.
         let _ = socket
@@ -137,9 +140,9 @@ async fn run_loop_inner(
         tokio::select! {
             _ = interval.tick() => {}
             // Poll for inbound packets; a single datagram holds one PeerAd.
-            recv = socket.recv_from(&mut [0u8; 2048]) => {
+            recv = socket.recv_from(&mut buf) => {
                 match recv {
-                    Ok((n, from)) => parse_and_track(&peers, &[0u8; 2048][..n], from).await,
+                    Ok((n, from)) => parse_and_track(&peers, &buf[..n], from).await,
                     Err(e) => debug!("recv error: {e}"),
                 }
             }

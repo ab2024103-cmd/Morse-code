@@ -14,11 +14,12 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use quinn::crypto::rustls::{QuicClientConfig, QuicServerConfig};
 use quinn::{ClientConfig, Endpoint, ServerConfig};
 use rcgen::CertifiedKey;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
-use rustls::{ClientConfig as RustlsClient, DigitallySignedStruct, SignatureScheme};
+use rustls::{ClientConfig as RustlsClient, ServerConfig as RustlsServer, DigitallySignedStruct, SignatureScheme};
 
 use crate::config::MAX_CONCURRENT_STREAMS;
 use crate::error::{EngineError, Result};
@@ -40,14 +41,17 @@ pub fn server_config(
     cert: CertificateDer<'static>,
     key: PrivateKeyDer<'static>,
 ) -> Result<ServerConfig> {
-    let mut tcfg = quinn::TransportConfig::default();
-    // Generous concurrency so a single connection can saturate a LAN link.
-    tcfg.max_concurrent_bidi_streams(MAX_CONCURRENT_STREAMS.into());
-    tcfg.max_concurrent_uni_streams(0u32.into());
-    tcfg.keep_alive_interval(Some(Duration::from_secs(5)));
+    // quinn 0.11 expects a rustls server config wrapped into a QuicServerConfig.
+    let rustls = RustlsServer::builder()
+        .with_no_client_auth()
+        .with_single_cert(vec![cert], key)
+        .map_err(|e| EngineError::Transport(format!("rustls server config: {e}")))?;
+    let crypto = QuicServerConfig::try_from(rustls)
+        .map_err(|e| EngineError::Transport(format!("quic server config: {e}")))?;
 
-    let mut cfg = ServerConfig::with_single_cert(vec![cert], key)
-        .map_err(|e| EngineError::Transport(format!("server config: {e}")))?;
+    let mut cfg = ServerConfig::with_crypto(Arc::new(crypto));
+    let mut tcfg = default_transport_config();
+    tcfg.max_concurrent_bidi_streams(MAX_CONCURRENT_STREAMS.into());
     cfg.transport_config(Arc::new(tcfg));
     Ok(cfg)
 }
@@ -59,15 +63,15 @@ pub fn client_config(cert: CertificateDer<'static>) -> Result<ClientConfig> {
         .add(cert)
         .map_err(|e| EngineError::Transport(format!("pin cert: {e}")))?;
 
-    let tls = RustlsClient::builder()
+    let rustls = RustlsClient::builder()
         .with_root_certificates(roots)
         .with_no_client_auth();
+    let crypto = QuicClientConfig::try_from(rustls)
+        .map_err(|e| EngineError::Transport(format!("quic client config: {e}")))?;
 
-    let mut tcfg = quinn::TransportConfig::default();
+    let mut cfg = ClientConfig::new(Arc::new(crypto));
+    let mut tcfg = default_transport_config();
     tcfg.max_concurrent_bidi_streams(MAX_CONCURRENT_STREAMS.into());
-    tcfg.keep_alive_interval(Some(Duration::from_secs(5)));
-
-    let mut cfg = ClientConfig::new(Arc::new(tls));
     cfg.transport_config(Arc::new(tcfg));
     Ok(cfg)
 }
@@ -90,9 +94,15 @@ pub fn bind_endpoint(
     }
 }
 
+fn default_transport_config() -> quinn::TransportConfig {
+    let mut tcfg = quinn::TransportConfig::default();
+    tcfg.max_concurrent_uni_streams(0u32.into());
+    tcfg.keep_alive_interval(Some(Duration::from_secs(5)));
+    tcfg
+}
+
 /// Verifier that accepts any server certificate. Used ONLY on the ephemeral
 /// discovery path; TLS 1.3 is still fully negotiated.
-#[derive(Debug)]
 pub struct SkipServerVerification;
 
 impl ServerCertVerifier for SkipServerVerification {
@@ -137,18 +147,18 @@ impl ServerCertVerifier for SkipServerVerification {
 
 /// Client config using the permissive verifier (host/CLI/testing only).
 pub fn insecure_client_config() -> ClientConfig {
-    #[derive(Debug)]
-    struct Skip(SkipServerVerification);
-
-    let tls = RustlsClient::builder()
+    let rustls = RustlsClient::builder()
         .dangerous()
-        .with_custom_certificate_verifier(Arc::new(Skip(SkipServerVerification)))
+        .with_custom_certificate_verifier(Arc::new(SkipServerVerification))
         .with_no_client_auth();
+    // Unwrapping is acceptable here: a rustls default builder with TLS 1.3 did
+    // not negotiate a cipher suite only in pathological builds.
+    let crypto = QuicClientConfig::try_from(rustls)
+        .expect("rustls default client config must be QUIC-compatible");
 
-    let mut tcfg = quinn::TransportConfig::default();
+    let mut cfg = ClientConfig::new(Arc::new(crypto));
+    let mut tcfg = default_transport_config();
     tcfg.max_concurrent_bidi_streams(MAX_CONCURRENT_STREAMS.into());
-
-    let mut cfg = ClientConfig::new(Arc::new(tls));
     cfg.transport_config(Arc::new(tcfg));
     cfg
 }

@@ -98,10 +98,7 @@ impl ControlMessage {
 }
 
 /// Write a length-prefixed JSON frame to a send stream.
-pub async fn write_frame<T: Serialize, S: quinn::SendStream + Unpin>(
-    send: &mut S,
-    value: &T,
-) -> Result<()> {
+pub async fn write_frame<T: Serialize>(send: &mut quinn::SendStream, value: &T) -> Result<()> {
     let bytes = serde_json::to_vec(value)?;
     if bytes.len() > MAX_CTRL_FRAME {
         return Err(EngineError::Transfer("frame exceeds max size".into()));
@@ -113,10 +110,7 @@ pub async fn write_frame<T: Serialize, S: quinn::SendStream + Unpin>(
 }
 
 /// Write `buf` in full using `SendStream`'s inherent `write`.
-pub async fn write_all_send<S: quinn::SendStream + Unpin>(
-    send: &mut S,
-    mut buf: &[u8],
-) -> Result<()> {
+pub async fn write_all_send(send: &mut quinn::SendStream, mut buf: &[u8]) -> Result<()> {
     while !buf.is_empty() {
         let n = send.write(buf).await?;
         if n == 0 {
@@ -128,8 +122,8 @@ pub async fn write_all_send<S: quinn::SendStream + Unpin>(
 }
 
 /// Read a length-prefixed JSON frame from a recv stream.
-pub async fn read_frame<T: for<'de> Deserialize<'de>, R: quinn::RecvStream + Unpin>(
-    recv: &mut R,
+pub async fn read_frame<T: for<'de> Deserialize<'de>>(
+    recv: &mut quinn::RecvStream,
     max: Option<usize>,
 ) -> Result<Option<T>> {
     let mut len_buf = [0u8; 4];
@@ -152,12 +146,11 @@ pub async fn read_frame<T: for<'de> Deserialize<'de>, R: quinn::RecvStream + Unp
 
 /// Read exactly `buf.len()` bytes; returns the number of bytes read (short only
 /// at clean EOF).
-async fn read_exact<R: quinn::RecvStream + Unpin>(recv: &mut R, mut buf: &mut [u8]) -> Result<usize> {
+async fn read_exact(recv: &mut quinn::RecvStream, buf: &mut [u8]) -> Result<usize> {
     let mut read = 0;
-    while !buf.is_empty() {
-        match recv.read(&mut buf).await {
+    while read < buf.len() {
+        match recv.read(&mut buf[read..]).await {
             Ok(Some(n)) => {
-                buf = &mut buf[n..];
                 read += n;
             }
             Ok(None) => break,

@@ -174,7 +174,7 @@ async fn handle_incoming_connection(connection: Connection, ctx: ServeContext) -
                 drop(drecv);
                 ctx.sink.on_transfer_complete(&meta.name, meta.size);
             }
-            msg = read_frame::<ControlMessage, _>(&mut ctrl_recv, None) => {
+            msg = read_frame::<ControlMessage>(&mut ctrl_recv, None) => {
                 match msg {
                     Ok(Some(ControlMessage::Done { name, .. })) => {
                         tracing::info!("transfer complete: {name}");
