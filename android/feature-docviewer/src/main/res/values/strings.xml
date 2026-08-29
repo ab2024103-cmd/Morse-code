@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Minimal values set: AGP 8.x GenerateLibraryRFileTask requires the
+     local-only symbol list (R-def.txt) produced by res parsing; a module with
+     layout/ or drawable/ but no values/ can fail validation with
+     "localResourcesFile ... doesn't exist". Keep one string so the parse task
+     always emits R-def.txt. -->
+<resources>
+    <string name="docviewer_app_label">Document Viewer</string>
+    <string name="docviewer_no_handler">No app available to open this document</string>
+</resources>
