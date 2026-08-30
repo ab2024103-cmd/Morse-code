@@ -2,7 +2,7 @@ package com.morselink.app
 
 import android.content.Context
 import morselink_core.EngineConfig
-import morselink_core.EngineError
+import morselink_core.EngineException
 import morselink_core.TransferEngine
 import morselink_core.TransferObserver
 
@@ -30,11 +30,12 @@ class MorseLinkEngine(private val context: Context) {
         )
         // UniFFI 0.28 maps the Rust `#[uniffi::constructor] fn new(...)` to the
         // object's primary Kotlin constructor, so instantiate directly (not via a
-        // `.new(...)` companion). The constructor throws `EngineError` (a sealed
-        // Exception subclass) on failure.
+        // `.new(...)` companion). UniFFI maps the Rust `EngineError` error type to
+        // a Kotlin `EngineException` sealed Exception class (the "Error" suffix
+        // is rewritten to "Exception"), so that is the catch type. Thrown on failure.
         val e = try {
             TransferEngine(config)
-        } catch (err: EngineError) {
+        } catch (err: EngineException) {
             throw IllegalStateException("Could not create transfer engine: ${err.message}", err)
         }
         e.setObserver(object : TransferObserver {
@@ -49,7 +50,7 @@ class MorseLinkEngine(private val context: Context) {
         try {
             e.start()
             engine = e
-        } catch (err: EngineError) {
+        } catch (err: EngineException) {
             throw IllegalStateException("Could not start transfer engine: ${err.message}", err)
         }
     }
