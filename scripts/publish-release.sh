@@ -32,8 +32,11 @@ say() {
   printf '%s\n' "$*"
   # Echo as a check-run annotation too: from the agent sandbox the
   # annotations API is the only reliably readable channel (job summaries and
-  # raw logs may be unavailable).
-  printf '::error::publish-release: %s\n' "${*//::/--}"
+  # raw logs may be unavailable). GitHub workflow commands are SINGLE-LINE —
+  # API error bodies are pretty-printed, so flatten newlines or everything
+  # after the first one is silently dropped by the annotation transport.
+  local flat="${*//$'\n'/ }"; flat="${flat//$'\r'/}"
+  printf '::error::publish-release: %s\n' "${flat//::/--}" >&2
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ] && [ -w "${GITHUB_STEP_SUMMARY:-/nonexistent}" ]; then
     { printf '> %s\n' "$*"; } >> "$GITHUB_STEP_SUMMARY"
   fi
