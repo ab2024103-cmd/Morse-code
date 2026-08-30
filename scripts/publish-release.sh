@@ -46,26 +46,41 @@ say() {
 # .git/config contains: [http "https://github.com/"] extraheader = "AUTHORIZATION: basic <b64(x-access-token:TOKEN)>"
 # ---------------------------------------------------------------------------
 cd "${GITHUB_WORKSPACE:-.}" 2>/dev/null || true
-HDR=""
-for key in \
-  'http.https://github.com/.extraheader' \
-  'http.https://api.github.com/.extraheader' ; do
-  HDR=$(git config --get "$key" 2>/dev/null || true)
-  [ -n "$HDR" ] && break
+CFG=""
+for c in "${GITHUB_WORKSPACE:-}/.git/config" ".git/config"; do
+  [ -n "$c" ] && [ -f "$c" ] && { CFG="$c"; break; }
 done
+HDR=""
+SRC="none"
+if [ -n "$CFG" ]; then
+  # Read the raw file directly: bulletproof against git config scoping quirks
+  # (cwd, safe.directory, GIT_CONFIG_* env). checkout writes:
+  #   extraheader = AUTHORIZATION: basic <b64("x-access-token:TOKEN")>
+  HDR=$(grep -m1 -i 'extraheader' "$CFG" 2>/dev/null | tr -cd '\040-\176' || true)
+  [ -n "$HDR" ] && SRC="file"
+fi
 if [ -z "$HDR" ]; then
-  # Fall back: any persisted extraheader.
-  HDR=$(git config --get-regexp '^http\..*extraheader' 2>/dev/null | head -n 1 | cut -d' ' -f2- || true)
+  HDR=$(git config --get 'http.https://github.com/.extraheader' 2>/dev/null || true)
+  [ -n "$HDR" ] && SRC="gitconfig"
 fi
 TOKEN=""
 if [ -n "$HDR" ]; then
-  B64=$(printf '%s' "$HDR" | tr -d ' \t' | grep -oE '[A-Za-z0-9+/=]{24,}$' || true)
+  # Isolate the base64 blob AFTER the "basic" scheme marker (the earlier
+  # greedy [A-Za-z0-9+/=]{24,}$ pattern also swallowed the word "basic"
+  # itself once spaces were stripped, yielding undecodable garbage).
+  B64=$(printf '%s' "$HDR" | sed -n 's/.*[Bb][Aa][Ss][Ii][Cc][[:space:]]*\([A-Za-z0-9+/=]\{24,\}\).*/\1/p')
   [ -n "$B64" ] && TOKEN=$(printf '%s' "$B64" | base64 -d 2>/dev/null | cut -s -d: -f2- || true)
+  if [ -n "$TOKEN" ] && [ "$TOKEN" != "$B64" ]; then :; else
+    # Some runners store the raw token (no "x-access-token:" prefix).
+    T2=$(printf '%s' "$B64" | base64 -d 2>/dev/null | tr -cd '\040-\176' || true)
+    [ -n "$T2" ] && [ ${#T2} -ge 20 ] && TOKEN="$T2"
+  fi
 fi
 if [ -z "$TOKEN" ]; then
-  say "publish-release: could not extract a job token from git config extraheader — skipping (no side effects)"
+  say "publish-release: could not extract a job token (cfg=${CFG:-none} hdr=$([ -n "$HDR" ] && echo present || echo absent)) — skipping (no side effects)"
   exit 0
 fi
+say "publish-release: job token obtained via=$SRC len=${#TOKEN}"
 
 api() { curl -sS --max-time 120 -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "$@"; }
 json() { jq -r "$1 // empty" 2>/dev/null; }
