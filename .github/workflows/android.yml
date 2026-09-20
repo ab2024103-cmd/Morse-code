@@ -20,7 +20,9 @@ jobs:
           java-version: "17"
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4  # v3 requests the retired legacy
+        #   `tools` SDK package (Google removed it 2026-09); v4 dropped that default
+        #   and runs on node24 natively.
 
       - name: Install Android platform / build-tools / NDK
         run: |
